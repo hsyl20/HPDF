@@ -78,8 +78,8 @@ m_sof0 :: Int
 m_sof0 = 0xc0 
 m_sof1 :: Int 
 m_sof1 = 0xc1 
---m_sof2 :: Int 
---m_sof2 = 0xc2  
+m_sof2 :: Int 
+m_sof2 = 0xc2  
 m_sof3 :: Int 
 m_sof3 = 0xc3  
 m_sof5 :: Int 
@@ -126,8 +126,8 @@ m_soi :: Int
 m_soi = 0xd8 
 m_eoi :: Int   
 m_eoi = 0xd9 
---m_sos :: Int   
---m_sos = 0xda
+m_sos :: Int   
+m_sos = 0xda
 --m_dqt :: Int    
 --m_dqt = 0xdb 
 --m_dnl :: Int   
@@ -247,14 +247,24 @@ parseJpegContent h = do
     case sof of
         a | a `elem` [m_sof5,m_sof6,m_sof7,m_sof9,m_sof10,m_sof11,m_sof13,m_sof14,m_sof15] ->
                 EXC.throwError "Unuspported compression mode"
-          | a `elem` [m_sof0,m_sof1,m_sof3] -> do
+          | a `elem` [m_sof0,m_sof1,m_sof2,m_sof3] -> do
               _ <- readWord16 h
               bits_per_component <- readWord8 h
               height <- readWord16 h
               width <- readWord16 h
               color_space  <- readWord8 h
               return (bits_per_component,height,width,color_space)                  
-          | a `elem` [m_soi,m_eoi,m_tem,m_rst0,m_rst1,m_rst2,m_rst3,m_rst4,m_rst5,m_rst6,m_rst7] -> parseJpegContent h
+          | a `elem` [m_soi,m_tem,m_rst0,m_rst1,m_rst2,m_rst3,m_rst4,m_rst5,m_rst6,m_rst7] -> parseJpegContent h
+          | a == m_sos -> let
+            loop = do
+              x <- readWord8 h
+              if x /= 0xff then loop else do
+                y <- readWord8 h
+                if y == 0x00 then loop else do
+                  io $ hSeek h RelativeSeek (-2)
+                  parseJpegContent h
+            in loop
+          | a == m_eoi -> EXC.throwError "parseJpegContent: hit end of image (EOI) marker before getting JPEG metadata"
           | otherwise -> do
                l <- readWord16 h
                io $ hSeek h RelativeSeek (fromIntegral (l-2))
