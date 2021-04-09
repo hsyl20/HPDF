@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE TemplateHaskell #-}
 ---------------------------------------------------------
 -- |
 -- Copyright   : (c) 2006-2016, alpheccar.org
@@ -19,10 +20,10 @@ module Graphics.PDF.Fonts.Encoding(
     , parseMacEncoding
     ) where
 
+import Data.ByteString (ByteString)
+import Data.FileEmbed (embedFile)
 import Graphics.PDF.LowLevel.Types
 import qualified Data.Map.Strict as M
-import System.FilePath
-import Paths_HPDF
 import qualified Data.ByteString.Char8 as C
 import Data.Char(digitToInt)
 import Data.Maybe(mapMaybe)
@@ -53,19 +54,22 @@ toMacData (name:_:mac:_) | C.unpack mac == "-" = Nothing
                          | otherwise = Just (C.unpack name,fromIntegral (from3Octal mac))
 toMacData _ = Nothing
 
-parseGlyphListEncoding :: String -> IO (M.Map PostscriptName Char)
-parseGlyphListEncoding name = do
-        path <- getDataFileName name
-        l <- C.readFile path
-        return (M.fromList . mapMaybe (toData  . C.split ';') . filter isLine . C.lines $ l)
+parseGlyphListEncoding :: ByteString -> IO (M.Map PostscriptName Char)
+parseGlyphListEncoding l = return (M.fromList . mapMaybe (toData  . C.split ';') . filter isLine . C.lines $ l)
+
+pdfencodings :: ByteString
+pdfencodings = $(embedFile "Encodings/pdfencodings.txt")
 
 parseMacEncoding :: IO (M.Map PostscriptName GlyphCode)
 parseMacEncoding = do
-    path <- getDataFileName "Encodings/pdfencodings.txt"
-    l <- C.readFile path
-    return . M.fromList . mapMaybe (toMacData . C.split '\t') . tail . C.lines $ l
+    return . M.fromList . mapMaybe (toMacData . C.split '\t') . tail . C.lines $ pdfencodings
 
+glyphlist :: ByteString
+glyphlist = $(embedFile "Encodings/glyphlist.txt")
+
+zapfdingbats :: ByteString
+zapfdingbats = $(embedFile "Encodings/zapfdingbats.txt")
 
 getEncoding :: Encodings -> IO (M.Map PostscriptName Char)
-getEncoding AdobeStandardEncoding = parseGlyphListEncoding $ "Encodings" </> "glyphlist" <.> "txt"
-getEncoding ZapfDingbatsEncoding= parseGlyphListEncoding $ "Encodings" </> "zapfdingbats" <.> "txt"
+getEncoding AdobeStandardEncoding = parseGlyphListEncoding glyphlist
+getEncoding ZapfDingbatsEncoding= parseGlyphListEncoding zapfdingbats

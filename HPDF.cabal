@@ -21,9 +21,6 @@ extra-source-files:
   TODO.txt
   changelog.md
 data-files:
-  Encodings/glyphlist.txt
-  Encodings/zapfdingbats.txt
-  Encodings/pdfencodings.txt
   Test/logo.jpg
 
 source-repository head
