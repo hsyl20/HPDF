@@ -32,7 +32,7 @@ import Graphics.PDF.Fonts.FontTypes
 import Graphics.PDF.Fonts.AFMParser (AFMFont, getFont, parseFont)
 import Data.List
 
-data Type1Font = Type1Font FontStructure (PDFReference EmbeddedFont)
+data Type1Font = Type1Font FontStructure (PDFReference EmbeddedFont) deriving Show
 
 instance IsFont Type1Font where 
   getDescent (Type1Font fs _) s = trueSize s $ descent fs 
@@ -44,7 +44,7 @@ instance IsFont Type1Font where
   hyphenGlyph (Type1Font fs _) = hyphen fs 
   spaceGlyph (Type1Font fs _) = space fs
 
-data AFMData = AFMData AFMFont 
+data AFMData = AFMData AFMFont deriving Show
 data Type1FontStructure = Type1FontStructure FontData FontStructure
 
 getAfmData :: FilePath -> IO AFMData 

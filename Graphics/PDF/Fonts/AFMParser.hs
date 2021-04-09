@@ -22,13 +22,15 @@ module Graphics.PDF.Fonts.AFMParser(
     , parseFont
     ) where 
 
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as B
+import Data.ByteString.Char8 (unpack)
 import Text.ParserCombinators.Parsec hiding(space)
 import Text.Parsec(modifyState)
 import Text.Parsec.Prim(parserZero)
 import Data.Char(toUpper)
 import qualified Data.Map.Strict as M
 import Graphics.PDF.Fonts.Font(emptyFontStructure)
-import Paths_HPDF
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Fonts.Encoding(PostscriptName)
 import Graphics.PDF.Fonts.FontTypes
@@ -380,30 +382,29 @@ fontToStructure afm' encoding' maybeMapNameToGlyph =
     Nothing -> fs2
     Just k -> foldr (addKern nameToGlyph) fs2 k
 
-afmParseFromFile :: AFMParser AFMFont -> FilePath -> IO (Either ParseError AFMFont)
-afmParseFromFile p path = do 
-  l <- readFile path 
-  return $ runParser p emptyAFM path l
+afmParseFromFile :: AFMParser AFMFont -> FilePath -> ByteString -> IO (Either ParseError AFMFont)
+afmParseFromFile p path bs = do 
+  return $ runParser p emptyAFM path (unpack bs)
 
-parseFont :: Either String String -> IO (Maybe AFMFont)
-parseFont (Left s) = do
-    path <- getDataFileName s
-    r <- afmParseFromFile afm path
+parseFont :: Either ByteString String -> IO (Maybe AFMFont)
+parseFont (Left bs) = do
+    r <- afmParseFromFile afm "<embedded>" bs
     case r of
       Left e -> error (show e)
       Right r' -> return $ Just r'
 parseFont (Right path) = do
-    r <- afmParseFromFile afm path
+    bs <- B.readFile path
+    r <- afmParseFromFile afm path bs
     case r of
       Left e -> error (show e)
       Right r' -> return $ Just r'
 
-getFont :: Either String AFMFont
+getFont :: Either ByteString AFMFont
         -> M.Map PostscriptName Char  -- ^ Glyph name to unicode
         -> Maybe (M.Map PostscriptName GlyphCode)  -- ^ Glyph name to glyph code if not standard coding
         -> IO (Maybe FontStructure)
 getFont (Left s) encoding' nameToGlyph = do 
-  result <- parseFont (Left s) 
+  result <- parseFont (Left s)
   case result of 
     Nothing -> return Nothing 
     Just r -> return (Just $ fontToStructure r encoding' nameToGlyph)

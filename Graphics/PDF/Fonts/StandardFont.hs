@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE TemplateHaskell #-}
 ---------------------------------------------------------
 -- |
 -- Copyright   : (c) 2006-2016, alpheccar.org
@@ -18,9 +19,11 @@ module Graphics.PDF.Fonts.StandardFont(
     , FontName(..)
     , StdFont(..)
     , mkStdFont
+    , embeddedFont
 ) where 
 
-
+import Data.ByteString (ByteString)
+import Data.FileEmbed (embedFile)
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Resources
 import qualified Data.Map.Strict as M
@@ -64,9 +67,23 @@ instance Show FontName where
     show Symbol = "Symbol"
     show ZapfDingbats = "ZapfDingbats"
 
+embeddedFont :: FontName -> ByteString
+embeddedFont Helvetica = $(embedFile "Core14_AFMs/Helvetica.afm")
+embeddedFont Helvetica_Bold = $(embedFile "Core14_AFMs/Helvetica-Bold.afm")
+embeddedFont Helvetica_Oblique = $(embedFile "Core14_AFMs/Helvetica-Oblique.afm")
+embeddedFont Helvetica_BoldOblique = $(embedFile "Core14_AFMs/Helvetica-BoldOblique.afm")
+embeddedFont Times_Roman = $(embedFile "Core14_AFMs/Times-Roman.afm")
+embeddedFont Times_Bold = $(embedFile "Core14_AFMs/Times-Bold.afm")
+embeddedFont Times_Italic = $(embedFile "Core14_AFMs/Times-Italic.afm")
+embeddedFont Times_BoldItalic = $(embedFile "Core14_AFMs/Times-BoldItalic.afm")
+embeddedFont Courier = $(embedFile "Core14_AFMs/Courier.afm")
+embeddedFont Courier_Bold = $(embedFile "Core14_AFMs/Courier-Bold.afm")
+embeddedFont Courier_Oblique = $(embedFile "Core14_AFMs/Courier-Oblique.afm")
+embeddedFont Courier_BoldOblique = $(embedFile "Core14_AFMs/Courier-BoldOblique.afm")
+embeddedFont Symbol = $(embedFile "Core14_AFMs/Symbol.afm")
+embeddedFont ZapfDingbats = $(embedFile "Core14_AFMs/ZapfDingbats.afm")
 
-
-data StdFont = StdFont FontStructure
+data StdFont = StdFont FontStructure deriving Show
 
 instance PdfResourceObject StdFont where
    toRsrc (StdFont f) =  AnyPdfObject . PDFDictionary . M.fromList $
@@ -90,7 +107,6 @@ instance IsFont StdFont where
 
 mkStdFont :: FontName -> IO (Maybe AnyFont)
 mkStdFont f = do
-  let path = "Core14_AFMs" </>  show f <.> "afm" 
   theEncoding <- case f of  
                     ZapfDingbats -> getEncoding ZapfDingbatsEncoding  
                     _ -> getEncoding AdobeStandardEncoding
@@ -98,7 +114,7 @@ mkStdFont f = do
                      ZapfDingbats -> return Nothing
                      Symbol -> return Nothing 
                      _ -> parseMacEncoding >>= return . Just
-  maybeFs <- getFont (Left path) theEncoding theMacEncoding
+  maybeFs <- getFont (Left $ embeddedFont f) theEncoding theMacEncoding
   case maybeFs of 
     Just theFont -> do
       let f' = theFont { baseFont = show f

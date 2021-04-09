@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE StandaloneDeriving #-}
 ---------------------------------------------------------
 -- |
 -- Copyright   : (c) 2006-2016, alpheccar.org
@@ -80,7 +81,9 @@ class IsFont f where
     spaceGlyph :: f -> GlyphCode
     charGlyph :: f -> Char  -> GlyphCode 
 
-data AnyFont = forall f. (IsFont f,PdfResourceObject f) => AnyFont f
+data AnyFont = forall f. (IsFont f,PdfResourceObject f,Show f) => AnyFont f
+
+deriving instance Show AnyFont
 
 instance PdfResourceObject AnyFont where
    toRsrc (AnyFont f) = toRsrc f

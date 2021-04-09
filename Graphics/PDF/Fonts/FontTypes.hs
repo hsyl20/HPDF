@@ -12,10 +12,11 @@
 ---------------------------------------------------------
 -- #hide
 module Graphics.PDF.Fonts.FontTypes
-   ( GlyphSize
+   ( GlyphSize(..)
    , FontSize 
    , FontStructure(..)
    , GlyphPair(..)
+   , GlyphCode(..)
    , FontData(..)
    , mkFlags
    )
@@ -31,9 +32,9 @@ import Data.Bits hiding(bit)
 type FontSize = Int
 
 
-newtype GlyphSize = GlyphSize Int deriving(Eq,Ord,Num,Integral,Enum,Real)
+newtype GlyphSize = GlyphSize Int deriving(Eq,Ord,Num,Integral,Enum,Real,Show)
 
-data GlyphPair = GlyphPair !GlyphCode !GlyphCode deriving(Eq,Ord) 
+data GlyphPair = GlyphPair !GlyphCode !GlyphCode deriving(Eq,Ord,Show) 
 
 data FontStructure = FS { baseFont :: String
                         , descent :: !GlyphSize 
@@ -56,7 +57,7 @@ data FontStructure = FS { baseFont :: String
                         , allCap :: !Bool 
                         , smallCap :: !Bool 
                         , forceBold :: !Bool 
-                        }
+                        } deriving Show
 
 mkFlags :: FontStructure -> Word32 
 mkFlags fs = bit (fixedPitch fs) 1 .|. 
