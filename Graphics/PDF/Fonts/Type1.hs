@@ -19,6 +19,7 @@ module Graphics.PDF.Fonts.Type1(
     , AFMData
     , Type1FontStructure(..)
     , getAfmData
+    , parseAfmData
     , mkType1FontStructure
 ) where 
 
@@ -54,7 +55,7 @@ getAfmData path = do
     return (AFMData r)
 
 parseAfmData :: B.ByteString -> IO AFMData
-pareAfmData bs = do
+parseAfmData bs = do
     Just r <- parseFont (Left bs)
     return (AFMData r)
 
