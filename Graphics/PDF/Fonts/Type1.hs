@@ -30,6 +30,7 @@ import Graphics.PDF.Fonts.Font
 import Graphics.PDF.Fonts.Encoding
 import Graphics.PDF.Fonts.FontTypes
 import Graphics.PDF.Fonts.AFMParser (AFMFont, getFont, parseFont)
+import qualified Data.ByteString as B
 import Data.List
 
 data Type1Font = Type1Font FontStructure (PDFReference EmbeddedFont) deriving Show
@@ -50,6 +51,11 @@ data Type1FontStructure = Type1FontStructure FontData FontStructure
 getAfmData :: FilePath -> IO AFMData 
 getAfmData path = do  
     Just r <- parseFont (Right path) 
+    return (AFMData r)
+
+parseAfmData :: B.ByteString -> IO AFMData
+pareAfmData bs = do
+    Just r <- parseFont (Left bs)
     return (AFMData r)
 
 mkType1FontStructure :: FontData -> AFMData -> IO (Maybe Type1FontStructure)
