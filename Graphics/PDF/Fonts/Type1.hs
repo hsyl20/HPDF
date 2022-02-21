@@ -30,10 +30,11 @@ import Graphics.PDF.Fonts.Font
 -- import Graphics.PDF.Fonts.AFMParser
 import Graphics.PDF.Fonts.Encoding
 import Graphics.PDF.Fonts.FontTypes
-import Graphics.PDF.Fonts.AFMParser (AFMFont, getFont, afmParseFromFile)
+import Graphics.PDF.Fonts.AFMParser (AFMFont, getFont, parseAfm)
 import qualified Data.ByteString as B
 import Data.List
-import Data.Bifunctor (Bifunctor(first))
+import Data.Bifunctor (Bifunctor(second))
+import Text.Parsec.Error (ParseError)
 
 data Type1Font = Type1Font FontStructure (PDFReference EmbeddedFont) deriving Show
 
@@ -51,19 +52,17 @@ data AFMData = AFMData AFMFont deriving Show
 data Type1FontStructure = Type1FontStructure FontData FontStructure
 
 readAfmData :: FilePath -> IO (Either ParseError AFMData)
-readAfmData path = first AFMData . afmParseFromFile afm path <$> B.readFile path
+readAfmData path = second AFMData . parseAfm path <$> B.readFile path
 
 parseAfmData :: B.ByteString -> Either ParseError AFMData
-parseAfmData bs = first AFMData $ afmParseFromFile afm "<embedded>" bs
+parseAfmData bs = second AFMData $ parseAfm "<bytestring>" bs
 
-mkType1FontStructure :: FontData -> AFMData -> IO (Maybe Type1FontStructure)
+mkType1FontStructure :: FontData -> AFMData -> IO Type1FontStructure
 mkType1FontStructure pdfRef (AFMData f)  = do
   theEncoding <- getEncoding AdobeStandardEncoding
-  maybeFs <- getFont (Right f) theEncoding Nothing
-  case maybeFs of 
-    Just theFont -> 
-      return . Just $ Type1FontStructure pdfRef theFont
-    Nothing -> return Nothing
+  -- a Right input to getFont always returns a Just
+  Just theFont <- getFont (Right f) theEncoding Nothing
+  return $ Type1FontStructure pdfRef theFont
 
  
 

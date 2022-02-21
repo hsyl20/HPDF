@@ -49,6 +49,7 @@ import Control.Monad.Writer
 import Data.Binary.Builder(fromByteString)
 import Graphics.PDF.Fonts.FontTypes(FontData(..))
 import Graphics.PDF.Fonts.Type1 
+import Text.Parsec.Error (ParseError)
 
 -- | Set page annotations
 setPageAnnotations :: [AnyAnnotation] -> PDFReference PDFPage -> PDF ()
@@ -282,16 +283,15 @@ createEmbeddedFont (Type1Data d) = do
 -- | Create a type 1 font 
 readType1Font :: FilePath 
               -> FilePath 
-              -> IO Type1FontStructure 
+              -> IO (Either ParseError Type1FontStructure)
 readType1Font pfb afmPath  = do 
   fd <- readFontData pfb 
-  afm <- getAfmData afmPath 
-  Just fs <- mkType1FontStructure fd afm 
-  return fs
+  result <- readAfmData afmPath
+  case result of
+    Left pe -> pure $ Left pe
+    Right afm -> Right <$> mkType1FontStructure fd afm 
 
 mkType1Font :: Type1FontStructure -> PDF AnyFont 
 mkType1Font (Type1FontStructure fd fs) = do 
    ref <- createEmbeddedFont fd 
    return (AnyFont $ Type1Font fs ref)
-
-

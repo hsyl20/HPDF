@@ -19,11 +19,10 @@ module Graphics.PDF.Fonts.AFMParser(
     , EncodingScheme(..)
     , Metric(..)
     , KX(..)
-    , afmParseFromFile
+    , parseAfm
     ) where 
 
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as B
 import Data.ByteString.Char8 (unpack)
 import Text.ParserCombinators.Parsec hiding(space)
 import Text.Parsec(modifyState)
@@ -385,13 +384,15 @@ fontToStructure afm' encoding' maybeMapNameToGlyph =
 afmParseFromFile :: AFMParser AFMFont -> FilePath -> ByteString -> Either ParseError AFMFont
 afmParseFromFile p path bs = runParser p emptyAFM path (unpack bs)
 
+parseAfm :: FilePath -> ByteString -> Either ParseError AFMFont
+parseAfm = afmParseFromFile afm
+
 getFont :: Either ByteString AFMFont
         -> M.Map PostscriptName Char  -- ^ Glyph name to unicode
         -> Maybe (M.Map PostscriptName GlyphCode)  -- ^ Glyph name to glyph code if not standard coding
         -> IO (Maybe FontStructure)
 getFont (Left s) encoding' nameToGlyph = do 
-  result <- parseFont (Left s)
-  case result of 
-    Nothing -> return Nothing 
-    Just r -> return (Just $ fontToStructure r encoding' nameToGlyph)
+  case parseAfm "<embedded>" s of 
+    Left _ -> return Nothing 
+    Right r -> return (Just $ fontToStructure r encoding' nameToGlyph)
 getFont (Right result) encoding' nameToGlyph = return . Just $ fontToStructure result encoding' nameToGlyph
