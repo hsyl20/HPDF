@@ -18,7 +18,7 @@ module Graphics.PDF.Fonts.Type1(
     , Type1Font(..)
     , AFMData
     , Type1FontStructure(..)
-    , getAfmData
+    , readAfmData
     , parseAfmData
     , mkType1FontStructure
 ) where 
@@ -50,8 +50,8 @@ instance IsFont Type1Font where
 data AFMData = AFMData AFMFont deriving Show
 data Type1FontStructure = Type1FontStructure FontData FontStructure
 
-getAfmData :: FilePath -> IO (Either ParseError AFMData)
-getAfmData path = first AFMData . afmParseFromFile afm path <$> B.readFile path
+readAfmData :: FilePath -> IO (Either ParseError AFMData)
+readAfmData path = first AFMData . afmParseFromFile afm path <$> B.readFile path
 
 parseAfmData :: B.ByteString -> Either ParseError AFMData
 parseAfmData bs = first AFMData $ afmParseFromFile afm "<embedded>" bs
