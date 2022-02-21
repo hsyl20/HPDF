@@ -19,7 +19,7 @@ module Graphics.PDF.Fonts.AFMParser(
     , EncodingScheme(..)
     , Metric(..)
     , KX(..)
-    , parseFont
+    , afmParseFromFile
     ) where 
 
 import Data.ByteString (ByteString)
@@ -382,15 +382,8 @@ fontToStructure afm' encoding' maybeMapNameToGlyph =
     Nothing -> fs2
     Just k -> foldr (addKern nameToGlyph) fs2 k
 
-afmParseFromFile :: AFMParser AFMFont -> FilePath -> ByteString -> IO (Either ParseError AFMFont)
-afmParseFromFile p path bs = do 
-  return $ runParser p emptyAFM path (unpack bs)
-
-parseFont :: Either ByteString String -> IO (Either ParseError AFMFont)
-parseFont (Left bs) = afmParseFromFile afm "<embedded>" bs
-parseFont (Right path) = do
-    bs <- B.readFile path
-    afmParseFromFile afm path bs
+afmParseFromFile :: AFMParser AFMFont -> FilePath -> ByteString -> Either ParseError AFMFont
+afmParseFromFile p path bs = runParser p emptyAFM path (unpack bs)
 
 getFont :: Either ByteString AFMFont
         -> M.Map PostscriptName Char  -- ^ Glyph name to unicode

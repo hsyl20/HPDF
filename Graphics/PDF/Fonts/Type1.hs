@@ -30,7 +30,7 @@ import Graphics.PDF.Fonts.Font
 -- import Graphics.PDF.Fonts.AFMParser
 import Graphics.PDF.Fonts.Encoding
 import Graphics.PDF.Fonts.FontTypes
-import Graphics.PDF.Fonts.AFMParser (AFMFont, getFont, parseFont)
+import Graphics.PDF.Fonts.AFMParser (AFMFont, getFont, afmParseFromFile)
 import qualified Data.ByteString as B
 import Data.List
 import Data.Bifunctor (Bifunctor(first))
@@ -51,10 +51,10 @@ data AFMData = AFMData AFMFont deriving Show
 data Type1FontStructure = Type1FontStructure FontData FontStructure
 
 getAfmData :: FilePath -> IO (Either ParseError AFMData)
-getAfmData = first AFMData . parseFont . Right
+getAfmData path = afmParseFromFile afm path <$> B.readFile path
 
-parseAfmData :: B.ByteString -> IO (Either ParseError AFMData)
-parseAfmData = first AFMData . parseFont . Left
+parseAfmData :: B.ByteString -> Either ParseError AFMData
+parseAfmData bs = afmParseFromFile afm "<embedded>" bs
 
 mkType1FontStructure :: FontData -> AFMData -> IO (Maybe Type1FontStructure)
 mkType1FontStructure pdfRef (AFMData f)  = do
