@@ -386,18 +386,11 @@ afmParseFromFile :: AFMParser AFMFont -> FilePath -> ByteString -> IO (Either Pa
 afmParseFromFile p path bs = do 
   return $ runParser p emptyAFM path (unpack bs)
 
-parseFont :: Either ByteString String -> IO (Maybe AFMFont)
-parseFont (Left bs) = do
-    r <- afmParseFromFile afm "<embedded>" bs
-    case r of
-      Left e -> error (show e)
-      Right r' -> return $ Just r'
+parseFont :: Either ByteString String -> IO (Either ParseError AFMFont)
+parseFont (Left bs) = afmParseFromFile afm "<embedded>" bs
 parseFont (Right path) = do
     bs <- B.readFile path
-    r <- afmParseFromFile afm path bs
-    case r of
-      Left e -> error (show e)
-      Right r' -> return $ Just r'
+    afmParseFromFile afm path bs
 
 getFont :: Either ByteString AFMFont
         -> M.Map PostscriptName Char  -- ^ Glyph name to unicode
@@ -409,4 +402,3 @@ getFont (Left s) encoding' nameToGlyph = do
     Nothing -> return Nothing 
     Just r -> return (Just $ fontToStructure r encoding' nameToGlyph)
 getFont (Right result) encoding' nameToGlyph = return . Just $ fontToStructure result encoding' nameToGlyph
-
