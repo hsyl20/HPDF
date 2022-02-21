@@ -689,11 +689,11 @@ testAll timesRoman timesBold helveticaBold symbol zapf jpg = do
 main :: IO()
 main = do
     let rect = PDFRect 0 0 600 400
-    Just timesRoman <- mkStdFont Times_Roman 
-    Just timesBold <- mkStdFont Times_Bold
-    Just helveticaBold <- mkStdFont Helvetica_Bold
-    Just symbol <- mkStdFont Symbol 
-    Just zapf <- mkStdFont ZapfDingbats
+    Right timesRoman <- mkStdFont Times_Roman 
+    Right timesBold <- mkStdFont Times_Bold
+    Right helveticaBold <- mkStdFont Helvetica_Bold
+    Right symbol <- mkStdFont Symbol 
+    Right zapf <- mkStdFont ZapfDingbats
 
     let logoPath = "Test/logo.jpg"
     Right jpg <- readJpegFile logoPath
