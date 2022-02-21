@@ -30,7 +30,7 @@ import Graphics.PDF.Fonts.Font
 -- import Graphics.PDF.Fonts.AFMParser
 import Graphics.PDF.Fonts.Encoding
 import Graphics.PDF.Fonts.FontTypes
-import Graphics.PDF.Fonts.AFMParser (AFMFont, getFont, parseAfm)
+import Graphics.PDF.Fonts.AFMParser (AFMFont, fontToStructure, parseAfm)
 import qualified Data.ByteString as B
 import Data.List
 import Data.Bifunctor (Bifunctor(second))
@@ -60,8 +60,7 @@ parseAfmData bs = second AFMData $ parseAfm "<bytestring>" bs
 mkType1FontStructure :: FontData -> AFMData -> IO Type1FontStructure
 mkType1FontStructure pdfRef (AFMData f)  = do
   theEncoding <- getEncoding AdobeStandardEncoding
-  -- a Right input to getFont always returns a Just
-  Just theFont <- getFont (Right f) theEncoding Nothing
+  let theFont = fontToStructure f theEncoding Nothing
   return $ Type1FontStructure pdfRef theFont
 
  

@@ -14,12 +14,12 @@
 -- AFM AFMParser
 ---------------------------------------------------------
 module Graphics.PDF.Fonts.AFMParser(
-      getFont
-    , AFMFont(..)
+      AFMFont(..)
     , EncodingScheme(..)
     , Metric(..)
     , KX(..)
     , parseAfm
+    , fontToStructure
     ) where 
 
 import Data.ByteString (ByteString)
@@ -342,8 +342,8 @@ addKern d (KX sa sb c) fs =
 -- Otherwise we use the encoding we found in the afm file.
 -- It is used to force MacRomanEncoding on not symbolic default fonts.
 fontToStructure :: AFMFont 
-                -> M.Map PostscriptName Char 
-                -> Maybe (M.Map PostscriptName GlyphCode)
+                -> M.Map PostscriptName Char   -- ^ Glyph name to unicode
+                -> Maybe (M.Map PostscriptName GlyphCode)  -- ^ Glyph name to glyph code if not standard coding
                 -> FontStructure 
 fontToStructure afm' encoding' maybeMapNameToGlyph =
   let h = (afmAscent afm' - afmDescent afm') 
@@ -386,13 +386,3 @@ afmParseFromFile p path bs = runParser p emptyAFM path (unpack bs)
 
 parseAfm :: FilePath -> ByteString -> Either ParseError AFMFont
 parseAfm = afmParseFromFile afm
-
-getFont :: Either ByteString AFMFont
-        -> M.Map PostscriptName Char  -- ^ Glyph name to unicode
-        -> Maybe (M.Map PostscriptName GlyphCode)  -- ^ Glyph name to glyph code if not standard coding
-        -> IO (Maybe FontStructure)
-getFont (Left s) encoding' nameToGlyph = do 
-  case parseAfm "<embedded>" s of 
-    Left _ -> return Nothing 
-    Right r -> return (Just $ fontToStructure r encoding' nameToGlyph)
-getFont (Right result) encoding' nameToGlyph = return . Just $ fontToStructure result encoding' nameToGlyph

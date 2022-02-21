@@ -28,9 +28,10 @@ import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Resources
 import qualified Data.Map.Strict as M
 import Graphics.PDF.Fonts.Font
-import Graphics.PDF.Fonts.AFMParser(getFont)
+import Graphics.PDF.Fonts.AFMParser(fontToStructure, parseAfm)
 import Graphics.PDF.Fonts.Encoding
 import Graphics.PDF.Fonts.FontTypes
+import Text.Parsec.Error(ParseError)
 
 
 data FontName = Helvetica 
@@ -104,7 +105,7 @@ instance IsFont StdFont where
   hyphenGlyph (StdFont fs) = hyphen fs 
   spaceGlyph (StdFont fs) = space fs
 
-mkStdFont :: FontName -> IO (Maybe AnyFont)
+mkStdFont :: FontName -> IO (Either ParseError AnyFont)
 mkStdFont f = do
   theEncoding <- case f of  
                     ZapfDingbats -> getEncoding ZapfDingbatsEncoding  
@@ -113,11 +114,8 @@ mkStdFont f = do
                      ZapfDingbats -> return Nothing
                      Symbol -> return Nothing 
                      _ -> parseMacEncoding >>= return . Just
-  maybeFs <- getFont (Left $ embeddedFont f) theEncoding theMacEncoding
-  case maybeFs of 
-    Just theFont -> do
-      let f' = theFont { baseFont = show f
-                       }
-      return . Just . AnyFont . StdFont $ f'
-    Nothing -> return Nothing
-
+  return $ case parseAfm "<embedded>" $ embeddedFont f of 
+    Left pe -> Left pe 
+    Right r -> Right $ let theFont = fontToStructure r theEncoding theMacEncoding
+                           f' = theFont { baseFont = show f }
+                       in AnyFont $ StdFont f'
