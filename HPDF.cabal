@@ -1,5 +1,5 @@
 Name: HPDF
-Version: 1.5.4
+Version: 1.6.0
 cabal-version: >=1.10
 License: BSD3
 License-file:LICENSE
@@ -132,4 +132,3 @@ library
      Graphics.PDF.Typesetting.StandardStyle
      Graphics.PDF.Fonts.AFMParser
      Graphics.PDF.Fonts.Encoding
-
