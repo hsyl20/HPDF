@@ -53,7 +53,7 @@ data Type1FontStructure = Type1FontStructure FontData FontStructure
 getAfmData :: FilePath -> IO (Either ParseError AFMData)
 getAfmData = first AFMData . parseFont . Right
 
-parseAfmData :: B.ByteString -> IO AFMData
+parseAfmData :: B.ByteString -> IO (Either ParseError AFMData)
 parseAfmData = first AFMData . parseFont . Left
 
 mkType1FontStructure :: FontData -> AFMData -> IO (Maybe Type1FontStructure)
