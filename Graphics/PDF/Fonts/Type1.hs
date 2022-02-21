@@ -51,10 +51,10 @@ data AFMData = AFMData AFMFont deriving Show
 data Type1FontStructure = Type1FontStructure FontData FontStructure
 
 getAfmData :: FilePath -> IO (Either ParseError AFMData)
-getAfmData path = afmParseFromFile afm path <$> B.readFile path
+getAfmData path = first AFMData . afmParseFromFile afm path <$> B.readFile path
 
 parseAfmData :: B.ByteString -> Either ParseError AFMData
-parseAfmData bs = afmParseFromFile afm "<embedded>" bs
+parseAfmData bs = first AFMData $ afmParseFromFile afm "<embedded>" bs
 
 mkType1FontStructure :: FontData -> AFMData -> IO (Maybe Type1FontStructure)
 mkType1FontStructure pdfRef (AFMData f)  = do
