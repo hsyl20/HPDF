@@ -37,6 +37,7 @@ import Graphics.PDF.Draw
 import Graphics.PDF.Resources
 import Graphics.PDF.Pages
 import qualified Data.ByteString.Lazy as B
+import Control.Monad
 import Control.Monad.Writer
 #if __GLASGOW_HASKELL__ >= 608
 import System.IO hiding(withFile)
