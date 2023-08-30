@@ -41,54 +41,30 @@ import Prelude hiding
         (not, min, max, log, sqrt, floor, ceiling, round, truncate)
 
 
-type ExprMonad = MW.Writer [C.ByteString]
+data Token = Token C.ByteString | Index Int
+    deriving (Show)
+
+type ExprMonad = MW.Writer [Token]
 
 newtype PDFExpression a = PDFExpression (ExprMonad ())
 
 
 serialize :: (Function f) => f -> CL.ByteString
 serialize f =
-    CL.unwords $ map CL.fromStrict $
-    MW.execWriter $ do
+    CL.unwords $
+    (\(n,stream) ->
+        map (\token ->
+                case token of
+                    Token str -> CL.fromStrict str
+                    Index k -> CL.pack $ show $ n-1-k) stream) $
+    MW.runWriter $ do
         n <- MS.execStateT (serializeFunction f) 0
         tokens $ replicate n "pop"
+        return n
 
 
-_serializeExpression :: PDFExpression a -> CL.ByteString
-_serializeExpression (PDFExpression expr) =
-    CL.unwords $ map CL.fromStrict $ MW.execWriter expr
-
-
-_serializeFunction1 ::
-    (PDFExpression a -> PDFExpression b) -> CL.ByteString
-_serializeFunction1 f = serialize $ f (argument 0)
-
-_serializeFunction2 ::
-    (PDFExpression a -> PDFExpression b -> PDFExpression c) -> CL.ByteString
-_serializeFunction2 f = serialize $ f (argument 0) (argument 1)
-
-_serializeFunction2RGB ::
-    (PDFExpression a -> PDFExpression a ->
-        (PDFExpression a, PDFExpression a, PDFExpression a)) ->
-    CL.ByteString
-_serializeFunction2RGB f =
-    serialize $ PDFExpression $
-    case f (argument 0) (argument 1) of
-        (PDFExpression a, PDFExpression b, PDFExpression c) -> do
-            let saveResult = tokens ["3", "2", "roll"]
-            a
-            saveResult
-            b
-            saveResult
-            c
-            saveResult
-            tokens ["pop", "pop"]
-
-
-
--- ToDo: mark argument indices and invert them in a second go
 class Function f where
-    serializeFunction :: f -> MS.StateT Int (MW.Writer [C.ByteString]) ()
+    serializeFunction :: f -> MS.StateT Int ExprMonad ()
 
 instance (Argument a, Function f) => Function (a -> f) where
     serializeFunction f = do
@@ -115,7 +91,7 @@ Extra class is needed in order
 to forbid nested functions like (a -> (a, a->a))
 -}
 class Result a where
-    serializeResult :: a -> MS.StateT Int (MW.Writer [C.ByteString]) ()
+    serializeResult :: a -> MS.StateT Int ExprMonad ()
 
 instance Result (PDFExpression a) where
     serializeResult (PDFExpression a) = do
@@ -165,11 +141,11 @@ instance
 
 
 tokens :: [String] -> ExprMonad ()
-tokens = MW.tell . map C.pack
+tokens = MW.tell . map (Token . C.pack)
 
 
 argument :: Int -> PDFExpression a
-argument k = PDFExpression $ tokens [show k, "index"]
+argument k = PDFExpression $ MW.tell [Index k, Token $ C.pack "index"]
 
 
 function1 :: String -> PDFExpression a -> PDFExpression b
