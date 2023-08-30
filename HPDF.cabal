@@ -108,6 +108,7 @@ library
      Graphics.PDF.Annotation
      Graphics.PDF.Pattern
      Graphics.PDF.Shading
+     Graphics.PDF.Expression
      Graphics.PDF.Typesetting
      Graphics.PDF.Documentation
   Other-Modules:
