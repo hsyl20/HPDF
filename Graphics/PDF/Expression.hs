@@ -32,6 +32,7 @@ import qualified Data.ByteString.Char8 as C
 import qualified Data.Ratio as Ratio
 
 import qualified Control.Monad.Trans as MT
+import qualified Control.Monad.RWS as MRWS
 import qualified Control.Monad.Writer as MW
 import qualified Control.Monad.State as MS
 import Control.Monad (when)
@@ -44,7 +45,7 @@ import Prelude hiding
 data Token = Token C.ByteString | Index Int
     deriving (Show)
 
-type ExprMonad = MW.Writer [Token]
+type ExprMonad = MRWS.RWS () [Token] Int
 
 newtype PDFExpression a = PDFExpression (ExprMonad ())
 
@@ -52,15 +53,18 @@ newtype PDFExpression a = PDFExpression (ExprMonad ())
 serialize :: (Function f) => f -> CL.ByteString
 serialize f =
     CL.unwords $
-    (\(n,stream) ->
+    (\(n,_,stream) ->
         map (\token ->
                 case token of
                     Token str -> CL.fromStrict str
-                    Index k -> CL.pack $ show $ n-1-k) stream) $
-    MW.runWriter $ do
-        n <- MS.execStateT (serializeFunction f) 0
-        tokens $ replicate n "pop"
-        return n
+                    Index k -> CL.pack $ show $ n-1+k) stream) $
+    MRWS.runRWS
+        (do
+            n <- MS.execStateT (serializeFunction f) 0
+            tokens $ replicate n "pop"
+            return n)
+        ()
+        0
 
 
 class Function f where
@@ -96,7 +100,12 @@ class Result a where
 instance Result (PDFExpression a) where
     serializeResult (PDFExpression a) = do
         n <- MS.get
-        MT.lift $ a >> when (n>0) (tokens [show (n+1), "1", "roll"])
+        MT.lift $ do
+            a
+            when (n>0) (tokens [show (n+1), "1", "roll"])
+            MS.modify pred
+            depth <- MS.get
+            when (depth/=0) $ error "stack must be empty after evaluation"
 
 instance (Result a, Result b) => Result (a,b) where
     serializeResult (a,b) =
@@ -145,7 +154,10 @@ tokens = MW.tell . map (Token . C.pack)
 
 
 argument :: Int -> PDFExpression a
-argument k = PDFExpression $ MW.tell [Index k, Token $ C.pack "index"]
+argument k = PDFExpression $ do
+    depth <- MS.get
+    MW.tell [Index (depth-k), Token $ C.pack "index"]
+    MS.modify succ
 
 
 function1 :: String -> PDFExpression a -> PDFExpression b
@@ -154,7 +166,7 @@ function1 name (PDFExpression a) =
 
 function2 :: String -> PDFExpression a -> PDFExpression b -> PDFExpression c
 function2 name (PDFExpression a) (PDFExpression b) =
-    PDFExpression $ a >> b >> tokens [name]
+    PDFExpression $ a >> b >> tokens [name] >> MS.modify pred
 
 
 infix 4 ==%, /=%, <%, <=%, >%, >=%
@@ -179,6 +191,7 @@ minMax cmp (PDFExpression a) (PDFExpression b) =
         a
         b
         tokens ["2", "copy", cmp, "{1 pop}", "{exch 1 pop}", "ifelse"]
+        MS.modify pred
 
 min, max :: (Ord a) => PDFExpression a -> PDFExpression a -> PDFExpression a
 min = minMax "lt"
@@ -186,8 +199,8 @@ max = minMax "gt"
 
 
 true, false :: PDFExpression Bool
-true = PDFExpression $ tokens ["true"]
-false = PDFExpression $ tokens ["false"]
+true  = PDFExpression $ tokens ["true"]  >> MS.modify succ
+false = PDFExpression $ tokens ["false"] >> MS.modify succ
 
 infixr 3 &&*
 (&&*) :: PDFExpression Bool -> PDFExpression Bool -> PDFExpression Bool
@@ -211,12 +224,14 @@ ifThenElse (PDFExpression cond) (PDFExpression a) (PDFExpression b) =
         tokens ["{"] >> a >> tokens ["}"]
         tokens ["{"] >> b >> tokens ["}"]
         tokens ["ifelse"]
+        MS.modify pred
+        MS.modify pred
 
 
 
 
 instance (Num a) => Num (PDFExpression a) where
-    fromInteger k = PDFExpression $ tokens [show k]
+    fromInteger k = PDFExpression $ tokens [show k] >> MS.modify succ
     negate = function1 "negate"
     abs = function1 "abs"
     (+) = function2 "add"
@@ -232,8 +247,9 @@ instance (Num a) => Num (PDFExpression a) where
 
 instance (Fractional a) => Fractional (PDFExpression a) where
     fromRational r =
-        PDFExpression $
-        tokens [show (Ratio.numerator r), show (Ratio.denominator r), "div"]
+        PDFExpression $ do
+            tokens [show (Ratio.numerator r), show (Ratio.denominator r), "div"]
+            MS.modify succ
     (/) = function2 "div"
 
 
