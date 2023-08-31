@@ -160,6 +160,10 @@ argument k = PDFExpression $ do
     MS.modify succ
 
 
+constant :: [String] -> PDFExpression b
+constant ts =
+    PDFExpression $ tokens ts >> MS.modify succ
+
 function1 :: String -> PDFExpression a -> PDFExpression b
 function1 name (PDFExpression a) =
     PDFExpression $ a >> tokens [name]
@@ -199,8 +203,8 @@ max = minMax "gt"
 
 
 true, false :: PDFExpression Bool
-true  = PDFExpression $ tokens ["true"]  >> MS.modify succ
-false = PDFExpression $ tokens ["false"] >> MS.modify succ
+true  = constant ["true"]
+false = constant ["false"]
 
 infixr 3 &&*
 (&&*) :: PDFExpression Bool -> PDFExpression Bool -> PDFExpression Bool
@@ -231,7 +235,7 @@ ifThenElse (PDFExpression cond) (PDFExpression a) (PDFExpression b) =
 
 
 instance (Num a) => Num (PDFExpression a) where
-    fromInteger k = PDFExpression $ tokens [show k] >> MS.modify succ
+    fromInteger k = constant [show k]
     negate = function1 "negate"
     abs = function1 "abs"
     (+) = function2 "add"
@@ -247,9 +251,7 @@ instance (Num a) => Num (PDFExpression a) where
 
 instance (Fractional a) => Fractional (PDFExpression a) where
     fromRational r =
-        PDFExpression $ do
-            tokens [show (Ratio.numerator r), show (Ratio.denominator r), "div"]
-            MS.modify succ
+        constant [show (Ratio.numerator r), show (Ratio.denominator r), "div"]
     (/) = function2 "div"
 
 
