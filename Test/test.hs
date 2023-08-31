@@ -17,6 +17,7 @@
 module Main where
 
 
+import qualified Graphics.PDF.Expression as Expr
 import Graphics.PDF
 import Penrose
 import System.Random
@@ -64,8 +65,19 @@ shadingTest :: Draw ()
 shadingTest  = do
      paintWithShading (RadialShading 0 0 50 0 0 600 (Rgb 1 0 0) (Rgb 0 0 1)) (addShape $ Rectangle 0 (300 :+ 300))
      paintWithShading (AxialShading 300 300 600 400 (Rgb 1 0 0) (Rgb 0 0 1)) (addShape $ Ellipse 300 300 600 400)
-     
-                     
+
+functionalShadingTest :: Draw ()
+functionalShadingTest =
+     paintWithShading
+        (FunctionalShading
+            (Matrix 300 0 0 300 150 50)
+            (RGBFunction $ \x y ->
+                (1-x,
+                 0.5 * (1 + Expr.sinDeg ((360*5) * Expr.sqrt (x*x+y*y))),
+                 1-y)))
+        (addShape $ Rectangle (150:+50) (450 :+ 350))
+
+
 patternTest :: PDFReference PDFPage -> PDF ()
 patternTest page = do
      p <- createUncoloredTiling 0 0 100 50 100 50 ConstantSpacing pattern
@@ -658,6 +670,11 @@ testAll timesRoman timesBold helveticaBold symbol zapf jpg = do
         drawWithPage page8 $ do
           shadingTest
           
+     page8a <- addPage Nothing
+     newSection "FunctionalShading" Nothing Nothing $ do
+        drawWithPage page8a $ do
+          functionalShadingTest
+
     page9 <- addPage Nothing
     newSection "Media" Nothing Nothing $ do
       newSection "image" Nothing Nothing $ do   
