@@ -71,7 +71,7 @@ projectY (_ :+ y) = (0 :+ y)
        
 data Matrix
    = Matrix !PDFFloat !PDFFloat !PDFFloat !PDFFloat !PDFFloat !PDFFloat
-   deriving (Eq, Show)
+   deriving (Eq, Ord, Show)
 
 instance Num Matrix where
     --  Matrix addition

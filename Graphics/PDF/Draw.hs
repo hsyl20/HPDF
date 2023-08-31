@@ -72,6 +72,7 @@ module Graphics.PDF.Draw(
  , AnyAnnotation(..)
  , AnnotationStyle(..)
  , PDFShading(..)
+ , RGBFunction(..)
  , getRgbColor
  , emptyDrawState
  , Matrix(..)
@@ -91,14 +92,19 @@ import qualified Data.Map.Strict as M
 import qualified Data.IntMap as IM
 import qualified Data.Binary.Builder as BU
 import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
 
 import Control.Monad.ST
 import Data.STRef
+
+import Data.Ord (comparing)
 
 import Control.Monad.Writer.Class
 import Control.Monad.Reader.Class
 import Control.Monad.State
 
+import qualified Graphics.PDF.Expression as Expr
+import Graphics.PDF.Expression (PDFExpression)
 import Graphics.PDF.Coordinates
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.LowLevel.Serializer
@@ -736,12 +742,44 @@ interpole n x y = AnyPdfObject . PDFDictionary . M.fromList $
                             , (PDFName "N", AnyPdfObject . PDFInteger $  n)
                             ]
 
--- | A shading                             
-data PDFShading = AxialShading PDFFloat PDFFloat PDFFloat PDFFloat Color Color
+
+type ExprFloat = PDFExpression PDFFloat
+
+newtype RGBFunction = RGBFunction (ExprFloat -> ExprFloat -> (ExprFloat, ExprFloat, ExprFloat))
+
+instance Eq RGBFunction where
+    RGBFunction a == RGBFunction b  =  Expr.serialize a == Expr.serialize b
+
+instance Ord RGBFunction where
+    compare (RGBFunction a) (RGBFunction b)  =  comparing Expr.serialize a b
+
+-- | A shading
+data PDFShading = FunctionalShading Matrix RGBFunction
+                | AxialShading PDFFloat PDFFloat PDFFloat PDFFloat Color Color
                 | RadialShading PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat Color Color
                 deriving(Eq,Ord)
 
+matrixCoefficients :: Matrix -> [PDFFloat]
+matrixCoefficients (Matrix a b c d e f) = [a,b,c,d,e,f]
+
 instance PdfResourceObject PDFShading where
+      toRsrc (FunctionalShading mat (RGBFunction func)) = AnyPdfObject . PDFDictionary . M.fromList $
+                                 [ (PDFName "ShadingType",AnyPdfObject . PDFInteger $ 1)
+                                 , (PDFName "Matrix",AnyPdfObject . matrixCoefficients $ mat)
+                                 , (PDFName "ColorSpace",AnyPdfObject . PDFName $ "DeviceRGB")
+                                 , (PDFName "Function",AnyPdfObject $
+                                    PDFStream
+                                        (BU.fromLazyByteString stream)
+                                        False
+                                        (PDFReference $ fromIntegral $ B.length stream)
+                                        (PDFDictionary . M.fromList $
+                                           [
+                                            (PDFName "FunctionType",AnyPdfObject . PDFInteger $ 4),
+                                            (PDFName "Domain",AnyPdfObject [0,1, 0,1::Int]),
+                                            (PDFName "Range",AnyPdfObject [0,1, 0,1, 0,1::Int])]))
+                                 ]
+        where
+            stream = C.cons '{' $ C.snoc (Expr.serialize func) '}'
       toRsrc (AxialShading x0 y0 x1 y1 ca cb) = AnyPdfObject . PDFDictionary . M.fromList $
                                  [ (PDFName "ShadingType",AnyPdfObject . PDFInteger $ 2)
                                  , (PDFName "Coords",AnyPdfObject . map AnyPdfObject $ [x0,y0,x1,y1])

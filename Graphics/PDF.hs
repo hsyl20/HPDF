@@ -54,6 +54,7 @@ module Graphics.PDF
   , module Graphics.PDF.Pattern
   -- ** Shading
   , module Graphics.PDF.Shading
+  , RGBFunction(..)
   -- ** Fonts
   , module Graphics.PDF.Fonts.Font 
   , module Graphics.PDF.Fonts.StandardFont
