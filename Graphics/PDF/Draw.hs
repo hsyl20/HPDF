@@ -733,14 +733,16 @@ getRgbColor (Rgb r g b) = (r, g, b)
 getRgbColor (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v) in (r, g, b)  
 
 -- | Interpolation function
-interpole :: Int -> PDFFloat -> PDFFloat -> AnyPdfObject
-interpole n x y = AnyPdfObject . PDFDictionary . M.fromList $ 
+interpoleRGB :: Int -> Color -> Color -> AnyPdfObject
+interpoleRGB n ca cb = AnyPdfObject . PDFDictionary . M.fromList $
                             [ (PDFName "FunctionType", AnyPdfObject . PDFInteger $ 2)
                             , (PDFName "Domain", AnyPdfObject . map AnyPdfObject $ ([0,1] :: [PDFFloat]))
-                            , (PDFName "C0", AnyPdfObject . map AnyPdfObject $ [x])
-                            , (PDFName "C1", AnyPdfObject . map AnyPdfObject $ [y])
+                            , (PDFName "C0", AnyPdfObject . map AnyPdfObject $ [ra,ga,ba])
+                            , (PDFName "C1", AnyPdfObject . map AnyPdfObject $ [rb,gb,bb])
                             , (PDFName "N", AnyPdfObject . PDFInteger $  n)
                             ]
+    where   (ra,ga,ba) = getRgbColor ca
+            (rb,gb,bb) = getRgbColor cb
 
 
 type ExprFloat = PDFExpression PDFFloat
@@ -784,20 +786,14 @@ instance PdfResourceObject PDFShading where
                                  [ (PDFName "ShadingType",AnyPdfObject . PDFInteger $ 2)
                                  , (PDFName "Coords",AnyPdfObject . map AnyPdfObject $ [x0,y0,x1,y1])
                                  , (PDFName "ColorSpace",AnyPdfObject . PDFName $ "DeviceRGB")
-                                 , (PDFName "Function",AnyPdfObject $ [interpole 1 ra rb,interpole 1 ga gb,interpole 1 ba bb])
+                                 , (PDFName "Function",AnyPdfObject $ interpoleRGB 1 ca cb)
                                  ]
-        where
-            (ra,ga,ba) = getRgbColor ca
-            (rb,gb,bb) = getRgbColor cb
       toRsrc (RadialShading x0 y0 r0 x1 y1 r1 ca cb) = AnyPdfObject . PDFDictionary . M.fromList $
                                          [ (PDFName "ShadingType",AnyPdfObject . PDFInteger $ 3)
                                          , (PDFName "Coords",AnyPdfObject . map AnyPdfObject $ [x0,y0,r0,x1,y1,r1])
                                          , (PDFName "ColorSpace",AnyPdfObject . PDFName $ "DeviceRGB")
-                                         , (PDFName "Function",AnyPdfObject $ [interpole 1 ra rb,interpole 1 ga gb,interpole 1 ba bb])
+                                         , (PDFName "Function",AnyPdfObject $ interpoleRGB 1 ca cb)
                                          ]
-        where
-           (ra,ga,ba) = getRgbColor ca
-           (rb,gb,bb) = getRgbColor cb
 
 
 -- | Apply a transformation matrix to the current coordinate frame
