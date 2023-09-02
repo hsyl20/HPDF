@@ -71,7 +71,7 @@ functionalShadingTest =
      paintWithShading
         (FunctionalShading
             (Matrix 300 0 0 300 150 50)
-            (RGBFunction $ \x y ->
+            (Function2 $ \x y ->
                 (1-x,
                  0.5 * (1 + Expr.sinDeg ((360*5) * Expr.sqrt (x*x+y*y))),
                  1-y)))

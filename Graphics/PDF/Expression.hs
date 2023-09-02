@@ -11,6 +11,7 @@
 ---------------------------------------------------------
 module Graphics.PDF.Expression (
     PDFExpression (..),
+    Function,
     serialize,
 
     (==%), (/=%),

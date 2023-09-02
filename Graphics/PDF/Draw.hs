@@ -72,7 +72,7 @@ module Graphics.PDF.Draw(
  , AnyAnnotation(..)
  , AnnotationStyle(..)
  , PDFShading(..)
- , RGBFunction(..)
+ , Function2(..)
  , getRgbColor
  , emptyDrawState
  , Matrix(..)
@@ -746,17 +746,18 @@ interpoleRGB n ca cb = AnyPdfObject . PDFDictionary . M.fromList $
 
 
 type ExprFloat = PDFExpression PDFFloat
+type ExprRGB = (ExprFloat, ExprFloat, ExprFloat)
 
-newtype RGBFunction = RGBFunction (ExprFloat -> ExprFloat -> (ExprFloat, ExprFloat, ExprFloat))
+newtype Function2 a = Function2 (ExprFloat -> ExprFloat -> a)
 
-instance Eq RGBFunction where
-    RGBFunction a == RGBFunction b  =  Expr.serialize a == Expr.serialize b
+instance (Expr.Function a) => Eq (Function2 a) where
+    Function2 a == Function2 b  =  Expr.serialize a == Expr.serialize b
 
-instance Ord RGBFunction where
-    compare (RGBFunction a) (RGBFunction b)  =  comparing Expr.serialize a b
+instance (Expr.Function a) => Ord (Function2 a) where
+    compare (Function2 a) (Function2 b)  =  comparing Expr.serialize a b
 
 -- | A shading
-data PDFShading = FunctionalShading Matrix RGBFunction
+data PDFShading = FunctionalShading Matrix (Function2 ExprRGB)
                 | AxialShading PDFFloat PDFFloat PDFFloat PDFFloat Color Color
                 | RadialShading PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat Color Color
                 deriving(Eq,Ord)
@@ -765,7 +766,7 @@ matrixCoefficients :: Matrix -> [PDFFloat]
 matrixCoefficients (Matrix a b c d e f) = [a,b,c,d,e,f]
 
 instance PdfResourceObject PDFShading where
-      toRsrc (FunctionalShading mat (RGBFunction func)) = AnyPdfObject . PDFDictionary . M.fromList $
+      toRsrc (FunctionalShading mat (Function2 func)) = AnyPdfObject . PDFDictionary . M.fromList $
                                  [ entry "ShadingType" (PDFInteger $ 1)
                                  , entry "Matrix" (matrixCoefficients $ mat)
                                  , entry "ColorSpace" (PDFName $ "DeviceRGB")
