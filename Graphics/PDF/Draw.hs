@@ -613,13 +613,13 @@ instance PdfLengthInfo PDFTransition where
 instance PdfObject PDFPages where
  toPDF (PDFPages c Nothing l) = toPDF $ PDFDictionary. M.fromList $ 
   [ entry "Type" (PDFName "Pages")
-  , entry "Kids" (map AnyPdfObject l)
+  , entry "Kids" l
   , entry "Count" (PDFInteger $ c)
   ]
  toPDF (PDFPages c (Just theParent) l) = toPDF $ PDFDictionary. M.fromList $ 
   [ entry "Type" (PDFName "Pages")
   , entry "Parent" theParent
-  , entry "Kids" (map AnyPdfObject l)
+  , entry "Kids" l
   , entry "Count" (PDFInteger $ c)
   ]
 
@@ -697,9 +697,9 @@ instance PdfLengthInfo Destination where
 
                                               
 instance PdfObject Color where
-   toPDF (Rgb r g b) = toPDF . map AnyPdfObject $ [r,g,b]  
+   toPDF (Rgb r g b) = toPDF [r,g,b]
    toPDF (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v)
-    in toPDF . map AnyPdfObject $ [r,g,b]
+    in toPDF [r,g,b]
 
 instance PdfLengthInfo Color where
 
@@ -736,9 +736,9 @@ getRgbColor (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v) in (r, g, b)
 interpoleRGB :: PDFFloat -> Color -> Color -> AnyPdfObject
 interpoleRGB n ca cb = AnyPdfObject . PDFDictionary . M.fromList $
                             [ entry "FunctionType" (PDFInteger $ 2)
-                            , entry "Domain" (map AnyPdfObject $ ([0,1] :: [PDFFloat]))
-                            , entry "C0" (map AnyPdfObject $ [ra,ga,ba])
-                            , entry "C1" (map AnyPdfObject $ [rb,gb,bb])
+                            , entry "Domain" [0,1 :: PDFFloat]
+                            , entry "C0" [ra,ga,ba]
+                            , entry "C1" [rb,gb,bb]
                             , entry "N" n
                             ]
     where   (ra,ga,ba) = getRgbColor ca
@@ -785,13 +785,13 @@ instance PdfResourceObject PDFShading where
             stream = C.cons '{' $ C.snoc (Expr.serialize func) '}'
       toRsrc (AxialShading x0 y0 x1 y1 ca cb) = AnyPdfObject . PDFDictionary . M.fromList $
                                  [ entry "ShadingType" (PDFInteger $ 2)
-                                 , entry "Coords" (map AnyPdfObject $ [x0,y0,x1,y1])
+                                 , entry "Coords" [x0,y0,x1,y1]
                                  , entry "ColorSpace" (PDFName $ "DeviceRGB")
                                  , entry "Function" (interpoleRGB 1 ca cb)
                                  ]
       toRsrc (RadialShading x0 y0 r0 x1 y1 r1 ca cb) = AnyPdfObject . PDFDictionary . M.fromList $
                                          [ entry "ShadingType" (PDFInteger $ 3)
-                                         , entry "Coords" (map AnyPdfObject $ [x0,y0,r0,x1,y1,r1])
+                                         , entry "Coords" [x0,y0,r0,x1,y1,r1]
                                          , entry "ColorSpace" (PDFName $ "DeviceRGB")
                                          , entry "Function" (interpoleRGB 1 ca cb)
                                          ]
