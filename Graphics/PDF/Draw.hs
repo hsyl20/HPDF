@@ -240,8 +240,8 @@ instance PdfObject PDFStream where
                   , serialize "endstream"]
    where
       compressedStream False = []
-      compressedStream True = if not (pdfDictMember (PDFName "Filter") d) then [(PDFName "Filter",AnyPdfObject $ [AnyPdfObject . PDFName $ "FlateDecode"])] else []
-      lenDict = PDFDictionary. M.fromList $ [ (PDFName "Length",AnyPdfObject l)] ++ compressedStream c
+      compressedStream True = if not (pdfDictMember (PDFName "Filter") d) then [entry "Filter" [AnyPdfObject . PDFName $ "FlateDecode"]] else []
+      lenDict = PDFDictionary. M.fromList $ [entry "Length" l] ++ compressedStream c
       dict = pdfDictUnion lenDict d
 
 instance PdfLengthInfo PDFStream where 
@@ -527,9 +527,9 @@ data PDFOutline = PDFOutline !(PDFReference PDFOutlineEntry) !(PDFReference PDFO
 
 instance PdfObject PDFOutline where
  toPDF (PDFOutline first lasto) = toPDF $ PDFDictionary. M.fromList $ [
-    (PDFName "Type",AnyPdfObject . PDFName $ "Outlines")
-  , (PDFName "First",AnyPdfObject first)
-  , (PDFName "Last",AnyPdfObject lasto)
+    entry "Type" (PDFName $ "Outlines")
+  , entry "First" first
+  , entry "Last" lasto
   ]
 
 instance PdfLengthInfo PDFOutline where
@@ -569,13 +569,13 @@ data OutlineLoc  a = OutlineLoc (Tree a) (OutlineCtx a)
 
 instance PdfObject PDFViewerPreferences where
   toPDF (PDFViewerPreferences ht hm hwui fw cw ddt nfspm ) = toPDF $ PDFDictionary. M.fromList $ 
-   [ (PDFName "HideToolbar",AnyPdfObject ht)
-   , (PDFName "HideMenubar",AnyPdfObject hm)
-   , (PDFName "HideWindowUI",AnyPdfObject hwui)
-   , (PDFName "FitWindow",AnyPdfObject fw)
-   , (PDFName "CenterWindow",AnyPdfObject cw)
-   , (PDFName "DisplayDocTitle",AnyPdfObject ddt)
-   , (PDFName "NonFullScreenPageMode",AnyPdfObject  . PDFName . show $ nfspm)
+   [ entry "HideToolbar" ht
+   , entry "HideMenubar" hm
+   , entry "HideWindowUI" hwui
+   , entry "FitWindow" fw
+   , entry "CenterWindow" cw
+   , entry "DisplayDocTitle" ddt
+   , entry "NonFullScreenPageMode" (PDFName . show $ nfspm)
    ]
 
 instance PdfLengthInfo PDFViewerPreferences where
@@ -591,19 +591,19 @@ instance Show PDFTransStyle where
 
 instance PdfObject PDFTransition where
  toPDF (PDFTransition d t) = toPDF $ PDFDictionary. M.fromList $ 
-   [ (PDFName "Type",AnyPdfObject (PDFName "Trans"))
-   , (PDFName "S",AnyPdfObject (PDFName (show t)))
-   , (PDFName "D",AnyPdfObject d)
+   [ entry "Type" (PDFName "Trans")
+   , entry "S" (PDFName (show t))
+   , entry "D" d
    ] ++ optionalDm t ++ optionalM t ++ optionalDi t
   where
-    optionalDm (Split a _) = [ (PDFName "Dm",AnyPdfObject (PDFName (show a)))]
-    optionalDm (Blinds a) = [ (PDFName "Dm",AnyPdfObject (PDFName (show a)))]
+    optionalDm (Split a _) = [ entry "Dm" (PDFName (show a))]
+    optionalDm (Blinds a) = [ entry "Dm" (PDFName (show a))]
     optionalDm _ = []
-    optionalM (Split _ a) = [ (PDFName "M",AnyPdfObject (PDFName (show a)))]
-    optionalM (Box a) = [ (PDFName "M",AnyPdfObject (PDFName (show a)))]
+    optionalM (Split _ a) = [ entry "M" (PDFName (show a))]
+    optionalM (Box a) = [ entry "M" (PDFName (show a))]
     optionalM _ = []    
-    optionalDi (Wipe a) = [ (PDFName "Di",AnyPdfObject (floatDirection a))]
-    optionalDi (Glitter a)  = [ (PDFName "Di",AnyPdfObject (floatDirection a))]
+    optionalDi (Wipe a) = [ entry "Di" (floatDirection a)]
+    optionalDi (Glitter a)  = [ entry "Di" (floatDirection a)]
     optionalDi _ = []  
 
 instance PdfLengthInfo PDFTransition where
@@ -612,34 +612,34 @@ instance PdfLengthInfo PDFTransition where
 
 instance PdfObject PDFPages where
  toPDF (PDFPages c Nothing l) = toPDF $ PDFDictionary. M.fromList $ 
-  [ (PDFName "Type",AnyPdfObject (PDFName "Pages"))
-  , (PDFName "Kids",AnyPdfObject $ map AnyPdfObject l)
-  , (PDFName "Count",AnyPdfObject . PDFInteger $ c)
-  ] 
+  [ entry "Type" (PDFName "Pages")
+  , entry "Kids" (map AnyPdfObject l)
+  , entry "Count" (PDFInteger $ c)
+  ]
  toPDF (PDFPages c (Just theParent) l) = toPDF $ PDFDictionary. M.fromList $ 
-  [ (PDFName "Type",AnyPdfObject (PDFName "Pages"))
-  , (PDFName "Parent",AnyPdfObject theParent)
-  , (PDFName "Kids",AnyPdfObject $ map AnyPdfObject l)
-  , (PDFName "Count",AnyPdfObject . PDFInteger $ c)
-  ] 
+  [ entry "Type" (PDFName "Pages")
+  , entry "Parent" theParent
+  , entry "Kids" (map AnyPdfObject l)
+  , entry "Count" (PDFInteger $ c)
+  ]
 
 instance PdfLengthInfo PDFPages where
 
 
 instance PdfObject PDFPage where
  toPDF (PDFPage (Just theParent) box content theRsrc d t theAnnots) = toPDF $ PDFDictionary. M.fromList $ 
-  [ (PDFName "Type",AnyPdfObject (PDFName "Page"))
-  , (PDFName "Parent",AnyPdfObject theParent)
-  , (PDFName "MediaBox",AnyPdfObject box)
-  , (PDFName "Contents",AnyPdfObject content)
-  , if isJust theRsrc 
+  [ entry "Type" (PDFName "Page")
+  , entry "Parent" theParent
+  , entry "MediaBox" box
+  , entry "Contents" content
+  , if isJust theRsrc
       then
-       (PDFName "Resources",AnyPdfObject . fromJust $ theRsrc) 
+       entry "Resources" (fromJust $ theRsrc)
       else 
-       (PDFName "Resources",AnyPdfObject emptyDictionary)
-  ] ++ (maybe [] (\x -> [(PDFName "Dur",AnyPdfObject x)]) d)
-  ++ (maybe [] (\x -> [(PDFName "Trans",AnyPdfObject x)]) t)
-  ++ ((\x -> if null x then [] else [(PDFName "Annots",AnyPdfObject x)]) theAnnots)
+       entry "Resources" emptyDictionary
+  ] ++ (maybe [] (\x -> [entry "Dur" x]) d)
+  ++ (maybe [] (\x -> [entry "Trans" x]) t)
+  ++ ((\x -> if null x then [] else [entry "Annots" x]) theAnnots)
  toPDF (PDFPage Nothing _ _ _ _ _ _) = noPdfObject
 
 instance PdfLengthInfo PDFPage where
@@ -648,12 +648,12 @@ instance PdfLengthInfo PDFPage where
 
 instance PdfObject PDFCatalog where
  toPDF (PDFCatalog outlines lPages pgMode pgLayout viewerPrefs) = toPDF $ PDFDictionary . M.fromList $ 
-   [ (PDFName "Type",AnyPdfObject (PDFName "Catalog"))
-   , (PDFName "Pages",AnyPdfObject lPages)
-   , (PDFName "PageMode", AnyPdfObject . PDFName . show $ pgMode)
-   , (PDFName "PageLayout", AnyPdfObject . PDFName . show $ pgLayout)
-   , (PDFName "ViewerPreferences", AnyPdfObject viewerPrefs)
-   ] ++ (maybe [] (\x -> [(PDFName "Outlines",AnyPdfObject x)]) outlines)
+   [ entry "Type" (PDFName "Catalog")
+   , entry "Pages" lPages
+   , entry "PageMode" (PDFName . show $ pgMode)
+   , entry "PageLayout" (PDFName . show $ pgLayout)
+   , entry "ViewerPreferences" viewerPrefs
+   ] ++ (maybe [] (\x -> [entry "Outlines" x]) outlines)
 
 instance PdfLengthInfo PDFCatalog where
 
@@ -667,22 +667,22 @@ instance PdfLengthInfo OutlineStyle where
 instance PdfObject PDFOutlineEntry where
  toPDF (PDFOutlineEntry title theParent prev next first theLast count dest color style) = 
      toPDF $ PDFDictionary. M.fromList $ [
-        (PDFName "Title",AnyPdfObject title)
-        , (PDFName "Parent",AnyPdfObject theParent)
+        entry "Title" title
+        , entry "Parent" theParent
         ]
       ++
-      maybe [] (\x -> [(PDFName "Prev",AnyPdfObject x)]) prev
+      maybe [] (\x -> [entry "Prev" x]) prev
       ++
-      maybe [] (\x -> [(PDFName "Next",AnyPdfObject x)]) next
+      maybe [] (\x -> [entry "Next" x]) next
       ++
-      maybe [] (\x -> [(PDFName "First",AnyPdfObject x)]) first
+      maybe [] (\x -> [entry "First" x]) first
       ++
-      maybe [] (\x -> [(PDFName "Last",AnyPdfObject x)]) theLast
+      maybe [] (\x -> [entry "Last" x]) theLast
       ++
-      [ (PDFName "Count",AnyPdfObject (PDFInteger count))
-      , (PDFName "Dest",AnyPdfObject dest)
-      , (PDFName "C",AnyPdfObject color)
-      , (PDFName "F",AnyPdfObject style)
+      [ entry "Count" (PDFInteger count)
+      , entry "Dest" dest
+      , entry "C" color
+      , entry "F" style
       ]
 
 instance PdfLengthInfo PDFOutlineEntry where
@@ -735,11 +735,11 @@ getRgbColor (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v) in (r, g, b)
 -- | Interpolation function
 interpoleRGB :: Int -> Color -> Color -> AnyPdfObject
 interpoleRGB n ca cb = AnyPdfObject . PDFDictionary . M.fromList $
-                            [ (PDFName "FunctionType", AnyPdfObject . PDFInteger $ 2)
-                            , (PDFName "Domain", AnyPdfObject . map AnyPdfObject $ ([0,1] :: [PDFFloat]))
-                            , (PDFName "C0", AnyPdfObject . map AnyPdfObject $ [ra,ga,ba])
-                            , (PDFName "C1", AnyPdfObject . map AnyPdfObject $ [rb,gb,bb])
-                            , (PDFName "N", AnyPdfObject . PDFInteger $  n)
+                            [ entry "FunctionType" (PDFInteger $ 2)
+                            , entry "Domain" (map AnyPdfObject $ ([0,1] :: [PDFFloat]))
+                            , entry "C0" (map AnyPdfObject $ [ra,ga,ba])
+                            , entry "C1" (map AnyPdfObject $ [rb,gb,bb])
+                            , entry "N" (PDFInteger $  n)
                             ]
     where   (ra,ga,ba) = getRgbColor ca
             (rb,gb,bb) = getRgbColor cb
@@ -766,33 +766,33 @@ matrixCoefficients (Matrix a b c d e f) = [a,b,c,d,e,f]
 
 instance PdfResourceObject PDFShading where
       toRsrc (FunctionalShading mat (RGBFunction func)) = AnyPdfObject . PDFDictionary . M.fromList $
-                                 [ (PDFName "ShadingType",AnyPdfObject . PDFInteger $ 1)
-                                 , (PDFName "Matrix",AnyPdfObject . matrixCoefficients $ mat)
-                                 , (PDFName "ColorSpace",AnyPdfObject . PDFName $ "DeviceRGB")
-                                 , (PDFName "Function",AnyPdfObject $
-                                    PDFStream
+                                 [ entry "ShadingType" (PDFInteger $ 1)
+                                 , entry "Matrix" (matrixCoefficients $ mat)
+                                 , entry "ColorSpace" (PDFName $ "DeviceRGB")
+                                 , entry "Function"
+                                    (PDFStream
                                         (BU.fromLazyByteString stream)
                                         False
                                         (PDFReference $ fromIntegral $ B.length stream)
                                         (PDFDictionary . M.fromList $
                                            [
-                                            (PDFName "FunctionType",AnyPdfObject . PDFInteger $ 4),
-                                            (PDFName "Domain",AnyPdfObject [0,1, 0,1::Int]),
-                                            (PDFName "Range",AnyPdfObject [0,1, 0,1, 0,1::Int])]))
+                                            entry "FunctionType" (PDFInteger $ 4),
+                                            entry "Domain" [0,1, 0,1::Int],
+                                            entry "Range" [0,1, 0,1, 0,1::Int]]))
                                  ]
         where
             stream = C.cons '{' $ C.snoc (Expr.serialize func) '}'
       toRsrc (AxialShading x0 y0 x1 y1 ca cb) = AnyPdfObject . PDFDictionary . M.fromList $
-                                 [ (PDFName "ShadingType",AnyPdfObject . PDFInteger $ 2)
-                                 , (PDFName "Coords",AnyPdfObject . map AnyPdfObject $ [x0,y0,x1,y1])
-                                 , (PDFName "ColorSpace",AnyPdfObject . PDFName $ "DeviceRGB")
-                                 , (PDFName "Function",AnyPdfObject $ interpoleRGB 1 ca cb)
+                                 [ entry "ShadingType" (PDFInteger $ 2)
+                                 , entry "Coords" (map AnyPdfObject $ [x0,y0,x1,y1])
+                                 , entry "ColorSpace" (PDFName $ "DeviceRGB")
+                                 , entry "Function" (interpoleRGB 1 ca cb)
                                  ]
       toRsrc (RadialShading x0 y0 r0 x1 y1 r1 ca cb) = AnyPdfObject . PDFDictionary . M.fromList $
-                                         [ (PDFName "ShadingType",AnyPdfObject . PDFInteger $ 3)
-                                         , (PDFName "Coords",AnyPdfObject . map AnyPdfObject $ [x0,y0,r0,x1,y1,r1])
-                                         , (PDFName "ColorSpace",AnyPdfObject . PDFName $ "DeviceRGB")
-                                         , (PDFName "Function",AnyPdfObject $ interpoleRGB 1 ca cb)
+                                         [ entry "ShadingType" (PDFInteger $ 3)
+                                         , entry "Coords" (map AnyPdfObject $ [x0,y0,r0,x1,y1,r1])
+                                         , entry "ColorSpace" (PDFName $ "DeviceRGB")
+                                         , entry "Function" (interpoleRGB 1 ca cb)
                                          ]
 
 

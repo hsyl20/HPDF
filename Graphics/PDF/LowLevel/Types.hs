@@ -286,6 +286,10 @@ instance PdfObject a => PdfLengthInfo [a] where
 
 newtype PDFDictionary = PDFDictionary (M.Map PDFName AnyPdfObject)
 
+entry ::
+    (PdfObject a, PdfLengthInfo a) => String -> a -> (PDFName, AnyPdfObject)
+entry name obj = (PDFName name, AnyPdfObject obj)
+
 instance PdfObject PDFDictionary where
   toPDF (PDFDictionary a) = mconcat $ [blt,blt,newline]
                                        ++ [convertLevel a]
