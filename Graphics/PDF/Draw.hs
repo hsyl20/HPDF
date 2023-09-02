@@ -742,15 +742,54 @@ getRgbColor (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v) in (r, g, b)
 
 type FloatRGB = (PDFFloat, PDFFloat, PDFFloat)
 
+rgbHex24 :: FloatRGB -> String
+rgbHex24 (r,g,b) = printf "%02X%02X%02X" (toByte r) (toByte g) (toByte b)
+    where
+        toByte :: PDFFloat -> Int
+        toByte x = round $ min 255 $ max 0 $ x*255
+
+rsrcFromSampled ::
+    M.Map PDFName AnyPdfObject ->
+    ((i, i) -> [Int]) -> Array i FloatRGB -> AnyPdfObject
+rsrcFromSampled domain computeSizes arr =
+    let stream =
+            (C.pack $ concatMap rgbHex24 $ Array.elems arr)
+            <>
+            C.pack " >" in
+    AnyPdfObject $
+    PDFStream
+        (BU.fromLazyByteString stream)
+        False
+        (PDFReference . fromIntegral . B.length $ stream)
+        (PDFDictionary . M.union domain . M.fromList $
+           [entry "FunctionType" (PDFInteger 0),
+            entry "Size" (computeSizes $ Array.bounds arr),
+            entry "BitsPerSample" (PDFInteger 8),
+            entry "Filter" (PDFName "ASCIIHexDecode")
+            ])
+
 -- | Interpolation function
-interpoleRGB :: M.Map PDFName AnyPdfObject -> PDFFloat -> FloatRGB -> FloatRGB -> AnyPdfObject
-interpoleRGB domain n (ra,ga,ba) (rb,gb,bb) =
+rsrcFromInterpolated ::
+    M.Map PDFName AnyPdfObject -> PDFFloat -> FloatRGB -> FloatRGB -> AnyPdfObject
+rsrcFromInterpolated domain n (ra,ga,ba) (rb,gb,bb) =
     AnyPdfObject . PDFDictionary . M.union domain . M.fromList $
                             [ entry "FunctionType" (PDFInteger $ 2)
                             , entry "C0" [ra,ga,ba]
                             , entry "C1" [rb,gb,bb]
                             , entry "N" n
                             ]
+
+rsrcFromFormula ::
+    (Expr.Function f) => M.Map PDFName AnyPdfObject -> f -> AnyPdfObject
+rsrcFromFormula domain f =
+    let stream = C.cons '{' $ C.snoc (Expr.serialize f) '}' in
+    AnyPdfObject $
+    PDFStream
+        (BU.fromLazyByteString stream)
+        False
+        (PDFReference . fromIntegral . B.length $ stream)
+        (PDFDictionary . M.union domain . M.fromList $
+            [entry "FunctionType" (PDFInteger 4)])
 
 
 type ExprFloat = PDFExpression PDFFloat
@@ -775,12 +814,6 @@ data Function1 a e =
 formula1 :: (ExprFloat -> e) -> Function1 a e
 formula1 = Formula1 . Formula
 
-rgbHex24 :: FloatRGB -> String
-rgbHex24 (r,g,b) = printf "%02X%02X%02X" (toByte r) (toByte g) (toByte b)
-    where
-        toByte :: PDFFloat -> Int
-        toByte x = round $ min 255 $ max 0 $ x*255
-
 instance PdfResourceObject (Function1 FloatRGB ExprRGB) where
     toRsrc func =
         let domain =
@@ -791,34 +824,11 @@ instance PdfResourceObject (Function1 FloatRGB ExprRGB) where
 
         case func of
             Sampled1 arr ->
-                let stream =
-                        (C.pack $ concatMap rgbHex24 $ Array.elems arr)
-                        <>
-                        C.pack " >" in
-                AnyPdfObject $
-                PDFStream
-                    (BU.fromLazyByteString stream)
-                    False
-                    (PDFReference . fromIntegral . B.length $ stream)
-                    (PDFDictionary . M.union domain . M.fromList $
-                       [
-                        entry "FunctionType" (PDFInteger 0),
-                        entry "Size" [Array.rangeSize $ Array.bounds arr],
-                        entry "BitsPerSample" (PDFInteger 8),
-                        entry "Filter" (PDFName "ASCIIHexDecode")
-                        ])
+                rsrcFromSampled domain (\bnds -> [Array.rangeSize bnds]) arr
 
-            Interpolated1 n x y -> interpoleRGB domain n x y
+            Interpolated1 n x y -> rsrcFromInterpolated domain n x y
 
-            Formula1 (Formula f) ->
-                let stream = C.cons '{' $ C.snoc (Expr.serialize f) '}' in
-                AnyPdfObject $
-                PDFStream
-                    (BU.fromLazyByteString stream)
-                    False
-                    (PDFReference $ fromIntegral $ B.length stream)
-                    (PDFDictionary . M.union domain . M.fromList $
-                       [entry "FunctionType" (PDFInteger 4)])
+            Formula1 (Formula f) -> rsrcFromFormula domain f
 
 
 data Function2 a e =
@@ -839,32 +849,12 @@ instance PdfResourceObject (Function2 FloatRGB ExprRGB) where
 
         case func of
             Sampled2 arr ->
-                let ((lx,ly), (ux,uy)) = Array.bounds arr
-                    stream =
-                        (C.pack $ concatMap rgbHex24 $ Array.elems arr)
-                        <>
-                        C.pack " >" in
-                AnyPdfObject $
-                PDFStream
-                    (BU.fromLazyByteString stream)
-                    False
-                    (PDFReference . fromIntegral . B.length $ stream)
-                    (PDFDictionary . M.union domain . M.fromList $
-                       [entry "FunctionType" (PDFInteger 0),
-                        entry "Size" [Array.rangeSize (lx,ux), Array.rangeSize (ly,uy)],
-                        entry "BitsPerSample" (PDFInteger 8),
-                        entry "Filter" (PDFName "ASCIIHexDecode")
-                        ])
+                rsrcFromSampled
+                    domain
+                    (\((lx,ly), (ux,uy)) -> [Array.rangeSize (lx,ux), Array.rangeSize (ly,uy)])
+                    arr
 
-            Formula2 (Formula f) ->
-                let stream = C.cons '{' $ C.snoc (Expr.serialize f) '}' in
-                AnyPdfObject $
-                PDFStream
-                    (BU.fromLazyByteString stream)
-                    False
-                    (PDFReference $ fromIntegral $ B.length stream)
-                    (PDFDictionary . M.union domain . M.fromList $
-                       [entry "FunctionType" (PDFInteger 4)])
+            Formula2 (Formula f) -> rsrcFromFormula domain f
 
 
 -- | A shading
