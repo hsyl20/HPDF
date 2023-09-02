@@ -23,6 +23,7 @@ import Penrose
 import System.Random
 import qualified Data.Vector.Unboxed as U
 import qualified Data.Text as T
+import Data.Array (listArray)
 import Network.URI 
 import Data.Maybe(fromJust)
 import System.FilePath 
@@ -63,15 +64,15 @@ lineStyle  = do
             
 shadingTest :: Draw ()
 shadingTest  = do
-     paintWithShading (RadialShading 0 0 50 0 0 600 (Rgb 1 0 0) (Rgb 0 0 1)) (addShape $ Rectangle 0 (300 :+ 300))
-     paintWithShading (AxialShading 300 300 600 400 (Rgb 1 0 0) (Rgb 0 0 1)) (addShape $ Ellipse 300 300 600 400)
+     paintWithShading (RadialShading 0 0 50 0 0 350 (Sampled1 $ listArray (0,3) [(1,0,0), (1,0,1), (0,0,1), (0,1,1)])) (addShape $ Rectangle 0 (300 :+ 300))
+     paintWithShading (AxialShading 300 300 600 400 (Interpolated1 1 (1,0,0) (0,0,1))) (addShape $ Ellipse 300 300 600 400)
 
 functionalShadingTest :: Draw ()
 functionalShadingTest =
      paintWithShading
         (FunctionalShading
             (Matrix 300 0 0 300 150 50)
-            (Function2 $ \x y ->
+            (formula2 $ \x y ->
                 (1-x,
                  0.5 * (1 + Expr.sinDeg ((360*5) * Expr.sqrt (x*x+y*y))),
                  1-y)))
@@ -336,7 +337,7 @@ instance ParagraphStyle MyVertStyles MyParaStyles  where
                         textStart 0 0
                         setFont (PDFFont theFont fontSize)
                         displayGlyphs (glyph c)
-                    paintWithShading (AxialShading 0 (- getDescent theFont fontSize) w' (getHeight theFont fontSize - getDescent theFont fontSize) (Rgb 1 0 0) (Rgb 0 0 1)) (addShape charRect)
+                    paintWithShading (AxialShading 0 (- getDescent theFont fontSize) w' (getHeight theFont fontSize - getDescent theFont fontSize) (Interpolated1 1 (1,0,0) (0,0,1))) (addShape charRect)
         in
         (BluePara theFont w', c':l)
     

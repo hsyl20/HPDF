@@ -61,6 +61,7 @@ Executable HPDF-Demo
                      text >= 1.2.0,
                      network-uri >= 2.6.0.3,
                      vector >=0.10,
+                     array,
                      filepath >= 1.4.0
 
   Default-language:  Haskell2010

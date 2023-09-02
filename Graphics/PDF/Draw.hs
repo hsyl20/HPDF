@@ -72,6 +72,10 @@ module Graphics.PDF.Draw(
  , AnyAnnotation(..)
  , AnnotationStyle(..)
  , PDFShading(..)
+ , Formula(..)
+ , formula1
+ , formula2
+ , Function1(..)
  , Function2(..)
  , getRgbColor
  , emptyDrawState
@@ -93,6 +97,8 @@ import qualified Data.IntMap as IM
 import qualified Data.Binary.Builder as BU
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
+import qualified Data.Array as Array
+import Data.Array (Array)
 
 import Control.Monad.ST
 import Data.STRef
@@ -112,6 +118,8 @@ import Graphics.PDF.Resources
 import Graphics.PDF.Data.PDFTree(PDFTree)
 import qualified Data.Text as T
 import Graphics.PDF.Fonts.Font(PDFFont(..))
+
+import Text.Printf (printf)
 
 data AnnotationStyle = AnnotationStyle !(Maybe Color)
 
@@ -732,68 +740,159 @@ getRgbColor :: Color -> (PDFFloat,PDFFloat,PDFFloat)
 getRgbColor (Rgb r g b) = (r, g, b)  
 getRgbColor (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v) in (r, g, b)  
 
+type FloatRGB = (PDFFloat, PDFFloat, PDFFloat)
+
 -- | Interpolation function
-interpoleRGB :: PDFFloat -> Color -> Color -> AnyPdfObject
-interpoleRGB n ca cb = AnyPdfObject . PDFDictionary . M.fromList $
+interpoleRGB :: PDFFloat -> FloatRGB -> FloatRGB -> AnyPdfObject
+interpoleRGB n (ra,ga,ba) (rb,gb,bb) = AnyPdfObject . PDFDictionary . M.fromList $
                             [ entry "FunctionType" (PDFInteger $ 2)
                             , entry "Domain" [0,1 :: PDFFloat]
                             , entry "C0" [ra,ga,ba]
                             , entry "C1" [rb,gb,bb]
                             , entry "N" n
                             ]
-    where   (ra,ga,ba) = getRgbColor ca
-            (rb,gb,bb) = getRgbColor cb
 
 
 type ExprFloat = PDFExpression PDFFloat
 type ExprRGB = (ExprFloat, ExprFloat, ExprFloat)
 
-newtype Function2 a = Function2 (ExprFloat -> ExprFloat -> a)
 
-instance (Expr.Result a) => Eq (Function2 a) where
-    Function2 a == Function2 b  =  Expr.serialize a == Expr.serialize b
+newtype Formula a = Formula a
 
-instance (Expr.Result a) => Ord (Function2 a) where
-    compare (Function2 a) (Function2 b)  =  comparing Expr.serialize a b
+instance (Expr.Function a) => Eq (Formula a) where
+    Formula a == Formula b  =  Expr.serialize a == Expr.serialize b
+
+instance (Expr.Function a) => Ord (Formula a) where
+    compare (Formula a) (Formula b)  =  comparing Expr.serialize a b
+
+-- ToDo: with custom Eq and Ord instances we can save the Formula wrapper
+data Function1 a e =
+      Sampled1 (Array Int a)
+    | Interpolated1 PDFFloat a a
+    | Formula1 (Formula (ExprFloat -> e))
+    deriving (Eq, Ord)
+
+formula1 :: (ExprFloat -> e) -> Function1 a e
+formula1 = Formula1 . Formula
+
+rgbHex24 :: FloatRGB -> String
+rgbHex24 (r,g,b) = printf "%02X%02X%02X" (toByte r) (toByte g) (toByte b)
+    where
+        toByte :: PDFFloat -> Int
+        toByte x = round $ min 255 $ max 0 $ x*255
+
+instance PdfResourceObject (Function1 FloatRGB ExprRGB) where
+    toRsrc (Sampled1 arr) =
+        AnyPdfObject $
+        PDFStream
+            (BU.fromLazyByteString stream)
+            False
+            (PDFReference . fromIntegral . B.length $ stream)
+            (PDFDictionary . M.fromList $
+               [
+                entry "FunctionType" (PDFInteger 0),
+                entry "Size" [Array.rangeSize $ Array.bounds arr],
+                entry "Domain" [0,1::Int],
+                entry "Range" [0,1, 0,1, 0,1::Int],
+                entry "BitsPerSample" (PDFInteger 8),
+                entry "Filter" (PDFName "ASCIIHexDecode")
+                ])
+        where
+            stream =
+                (C.pack $ concatMap rgbHex24 $ Array.elems arr)
+                <>
+                C.pack " >"
+
+    toRsrc (Interpolated1 n x y) = interpoleRGB n x y
+
+    toRsrc (Formula1 (Formula func)) =
+        AnyPdfObject $
+        PDFStream
+            (BU.fromLazyByteString stream)
+            False
+            (PDFReference $ fromIntegral $ B.length stream)
+            (PDFDictionary . M.fromList $
+               [
+                entry "FunctionType" (PDFInteger 4),
+                entry "Domain" [0,1::Int],
+                entry "Range" [0,1, 0,1, 0,1::Int]])
+        where
+            stream = C.cons '{' $ C.snoc (Expr.serialize func) '}'
+
+
+data Function2 a e =
+      Sampled2 (Array (Int,Int) a)
+    | Formula2 (Formula (ExprFloat -> ExprFloat -> e))
+    deriving (Eq, Ord)
+
+formula2 :: (ExprFloat -> ExprFloat -> e) -> Function2 a e
+formula2 = Formula2 . Formula
+
+instance PdfResourceObject (Function2 FloatRGB ExprRGB) where
+    toRsrc (Sampled2 arr) =
+        AnyPdfObject $
+        PDFStream
+            (BU.fromLazyByteString stream)
+            False
+            (PDFReference . fromIntegral . B.length $ stream)
+            (PDFDictionary . M.fromList $
+               [
+                entry "FunctionType" (PDFInteger 0),
+                entry "Size" [Array.rangeSize (lx,ux), Array.rangeSize (ly,uy)],
+                entry "Domain" [0,1, 0,1::Int],
+                entry "Range" [0,1, 0,1, 0,1::Int],
+                entry "BitsPerSample" (PDFInteger 8),
+                entry "Filter" (PDFName "ASCIIHexDecode")
+                ])
+        where
+            ((lx,ly), (ux,uy)) = Array.bounds arr
+            stream =
+                (C.pack $ concatMap rgbHex24 $ Array.elems arr)
+                <>
+                C.pack " >"
+
+    toRsrc (Formula2 (Formula func)) =
+        AnyPdfObject $
+        PDFStream
+            (BU.fromLazyByteString stream)
+            False
+            (PDFReference $ fromIntegral $ B.length stream)
+            (PDFDictionary . M.fromList $
+               [
+                entry "FunctionType" (PDFInteger 4),
+                entry "Domain" [0,1, 0,1::Int],
+                entry "Range" [0,1, 0,1, 0,1::Int]])
+        where
+            stream = C.cons '{' $ C.snoc (Expr.serialize func) '}'
+
 
 -- | A shading
-data PDFShading = FunctionalShading Matrix (Function2 ExprRGB)
-                | AxialShading PDFFloat PDFFloat PDFFloat PDFFloat Color Color
-                | RadialShading PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat Color Color
+data PDFShading = FunctionalShading Matrix (Function2 FloatRGB ExprRGB)
+                | AxialShading PDFFloat PDFFloat PDFFloat PDFFloat (Function1 FloatRGB ExprRGB)
+                | RadialShading PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat (Function1 FloatRGB ExprRGB)
                 deriving(Eq,Ord)
 
 matrixCoefficients :: Matrix -> [PDFFloat]
 matrixCoefficients (Matrix a b c d e f) = [a,b,c,d,e,f]
 
 instance PdfResourceObject PDFShading where
-      toRsrc (FunctionalShading mat (Function2 func)) = AnyPdfObject . PDFDictionary . M.fromList $
+      toRsrc (FunctionalShading mat func) = AnyPdfObject . PDFDictionary . M.fromList $
                                  [ entry "ShadingType" (PDFInteger $ 1)
                                  , entry "Matrix" (matrixCoefficients $ mat)
                                  , entry "ColorSpace" (PDFName $ "DeviceRGB")
-                                 , entry "Function"
-                                    (PDFStream
-                                        (BU.fromLazyByteString stream)
-                                        False
-                                        (PDFReference $ fromIntegral $ B.length stream)
-                                        (PDFDictionary . M.fromList $
-                                           [
-                                            entry "FunctionType" (PDFInteger $ 4),
-                                            entry "Domain" [0,1, 0,1::Int],
-                                            entry "Range" [0,1, 0,1, 0,1::Int]]))
+                                 , entry "Function" (toRsrc func)
                                  ]
-        where
-            stream = C.cons '{' $ C.snoc (Expr.serialize func) '}'
-      toRsrc (AxialShading x0 y0 x1 y1 ca cb) = AnyPdfObject . PDFDictionary . M.fromList $
+      toRsrc (AxialShading x0 y0 x1 y1 func) = AnyPdfObject . PDFDictionary . M.fromList $
                                  [ entry "ShadingType" (PDFInteger $ 2)
                                  , entry "Coords" [x0,y0,x1,y1]
                                  , entry "ColorSpace" (PDFName $ "DeviceRGB")
-                                 , entry "Function" (interpoleRGB 1 ca cb)
+                                 , entry "Function" (toRsrc func)
                                  ]
-      toRsrc (RadialShading x0 y0 r0 x1 y1 r1 ca cb) = AnyPdfObject . PDFDictionary . M.fromList $
+      toRsrc (RadialShading x0 y0 r0 x1 y1 r1 func) = AnyPdfObject . PDFDictionary . M.fromList $
                                          [ entry "ShadingType" (PDFInteger $ 3)
                                          , entry "Coords" [x0,y0,r0,x1,y1,r1]
                                          , entry "ColorSpace" (PDFName $ "DeviceRGB")
-                                         , entry "Function" (interpoleRGB 1 ca cb)
+                                         , entry "Function" (toRsrc func)
                                          ]
 
 

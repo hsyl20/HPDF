@@ -54,6 +54,10 @@ module Graphics.PDF
   , module Graphics.PDF.Pattern
   -- ** Shading
   , module Graphics.PDF.Shading
+  , Formula(..)
+  , formula1
+  , formula2
+  , Function1(..)
   , Function2(..)
   -- ** Fonts
   , module Graphics.PDF.Fonts.Font 
