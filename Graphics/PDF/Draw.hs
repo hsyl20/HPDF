@@ -733,13 +733,13 @@ getRgbColor (Rgb r g b) = (r, g, b)
 getRgbColor (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v) in (r, g, b)  
 
 -- | Interpolation function
-interpoleRGB :: Int -> Color -> Color -> AnyPdfObject
+interpoleRGB :: PDFFloat -> Color -> Color -> AnyPdfObject
 interpoleRGB n ca cb = AnyPdfObject . PDFDictionary . M.fromList $
                             [ entry "FunctionType" (PDFInteger $ 2)
                             , entry "Domain" (map AnyPdfObject $ ([0,1] :: [PDFFloat]))
                             , entry "C0" (map AnyPdfObject $ [ra,ga,ba])
                             , entry "C1" (map AnyPdfObject $ [rb,gb,bb])
-                            , entry "N" (PDFInteger $  n)
+                            , entry "N" n
                             ]
     where   (ra,ga,ba) = getRgbColor ca
             (rb,gb,bb) = getRgbColor cb
