@@ -12,6 +12,8 @@
 module Graphics.PDF.Expression (
     PDFExpression (..),
     Function,
+    Result,
+    Argument,
     serialize,
 
     (==%), (/=%),
@@ -95,7 +97,7 @@ instance
 Extra class is needed in order
 to forbid nested functions like (a -> (a, a->a))
 -}
-class Result a where
+class (Function a) => Result a where
     serializeResult :: a -> MS.StateT Int ExprMonad ()
 
 instance Result (PDFExpression a) where

@@ -750,10 +750,10 @@ type ExprRGB = (ExprFloat, ExprFloat, ExprFloat)
 
 newtype Function2 a = Function2 (ExprFloat -> ExprFloat -> a)
 
-instance (Expr.Function a) => Eq (Function2 a) where
+instance (Expr.Result a) => Eq (Function2 a) where
     Function2 a == Function2 b  =  Expr.serialize a == Expr.serialize b
 
-instance (Expr.Function a) => Ord (Function2 a) where
+instance (Expr.Result a) => Ord (Function2 a) where
     compare (Function2 a) (Function2 b)  =  comparing Expr.serialize a b
 
 -- | A shading
