@@ -2,9 +2,11 @@
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE StandaloneDeriving #-}
 ---------------------------------------------------------
 -- |
 -- Copyright   : (c) 2006-2016, alpheccar.org
@@ -72,9 +74,12 @@ module Graphics.PDF.Draw(
  , AnyAnnotation(..)
  , AnnotationStyle(..)
  , PDFShading(..)
+ , ColorSpace(..)
  , Formula(..)
  , calculator1
  , calculator2
+ , ColorFunction1(..)
+ , ColorFunction2(..)
  , Function1(..)
  , Function2(..)
  , getRgbColor
@@ -742,18 +747,33 @@ getRgbColor (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v) in (r, g, b)
 
 type FloatRGB = (PDFFloat, PDFFloat, PDFFloat)
 
-rgbHex24 :: FloatRGB -> String
-rgbHex24 (r,g,b) = printf "%02X%02X%02X" (toByte r) (toByte g) (toByte b)
-    where
-        toByte :: PDFFloat -> Int
-        toByte x = round $ min 255 $ max 0 $ x*255
+class ColorTuple a where
+    rgbHex :: a -> String
+    colorComponents :: a -> [PDFFloat]
+    colorDimensions :: f a e -> Int
+
+instance ColorTuple PDFFloat where
+    rgbHex c = printf "%02X" (byteFromFloat c)
+    colorComponents c = [c]
+    colorDimensions _ = 1
+
+instance (a ~ PDFFloat, b ~ PDFFloat, c ~ PDFFloat) => ColorTuple (a,b,c) where
+    rgbHex (r,g,b) =
+        printf "%02X%02X%02X"
+            (byteFromFloat r) (byteFromFloat g) (byteFromFloat b)
+    colorComponents (r,g,b) = [r,g,b]
+    colorDimensions _ = 3
+
+byteFromFloat :: PDFFloat -> Int
+byteFromFloat x = round $ min 255 $ max 0 $ x*255
 
 rsrcFromSampled ::
+    (ColorTuple a) =>
     M.Map PDFName AnyPdfObject ->
-    ((i, i) -> [Int]) -> Array i FloatRGB -> AnyPdfObject
+    ((i, i) -> [Int]) -> Array i a -> AnyPdfObject
 rsrcFromSampled domain computeSizes arr =
     let stream =
-            (C.pack $ concatMap rgbHex24 $ Array.elems arr)
+            (C.pack $ concatMap rgbHex $ Array.elems arr)
             <>
             C.pack " >" in
     AnyPdfObject $
@@ -770,12 +790,13 @@ rsrcFromSampled domain computeSizes arr =
 
 -- | Interpolation function
 rsrcFromInterpolated ::
-    M.Map PDFName AnyPdfObject -> PDFFloat -> FloatRGB -> FloatRGB -> AnyPdfObject
-rsrcFromInterpolated domain n (ra,ga,ba) (rb,gb,bb) =
+    (ColorTuple a) =>
+    M.Map PDFName AnyPdfObject -> PDFFloat -> a -> a -> AnyPdfObject
+rsrcFromInterpolated domain n a b =
     AnyPdfObject . PDFDictionary . M.union domain . M.fromList $
                             [ entry "FunctionType" (PDFInteger $ 2)
-                            , entry "C0" [ra,ga,ba]
-                            , entry "C1" [rb,gb,bb]
+                            , entry "C0" (colorComponents a)
+                            , entry "C1" (colorComponents b)
                             , entry "N" n
                             ]
 
@@ -804,6 +825,66 @@ instance (Expr.Function a) => Eq (Formula a) where
 instance (Expr.Function a) => Ord (Formula a) where
     compare (Formula a) (Formula b)  =  comparing Expr.serialize a b
 
+data ColorSpace a e where
+    GraySpace :: ColorSpace PDFFloat ExprFloat
+    RGBSpace :: ColorSpace FloatRGB ExprRGB
+
+deriving instance Eq (ColorSpace a e)
+deriving instance Ord (ColorSpace a e)
+
+colorSpaceEntry :: ColorSpace a e -> (PDFName, AnyPdfObject)
+colorSpaceEntry space =
+    case space of
+        GraySpace -> entry "ColorSpace" $ PDFName "DeviceGray"
+        RGBSpace -> entry "ColorSpace" $ PDFName "DeviceRGB"
+
+rangeEntry :: (ColorTuple a) => f a e -> (PDFName, AnyPdfObject)
+rangeEntry func =
+    entry "Range" $ concat $ replicate (colorDimensions func) [0,1::Int]
+
+
+data ColorFunction1 =
+    forall a e.
+    (ColorTuple a, Expr.Result e) =>
+    ColorFunction1 (ColorSpace a e) (Function1 a e)
+
+instance Eq ColorFunction1 where
+    ColorFunction1 spaceA funcA == ColorFunction1 spaceB funcB  =
+        case (spaceA, spaceB) of
+            (GraySpace, GraySpace) -> funcA == funcB
+            (RGBSpace, RGBSpace) -> funcA == funcB
+            _ -> False
+
+instance Ord ColorFunction1 where
+    compare (ColorFunction1 spaceA funcA) (ColorFunction1 spaceB funcB) =
+        case (spaceA, spaceB) of
+            (GraySpace, GraySpace) -> compare funcA funcB
+            (RGBSpace, RGBSpace) -> compare funcA funcB
+            (GraySpace, RGBSpace) -> LT
+            (RGBSpace, GraySpace) -> GT
+
+
+data ColorFunction2 =
+    forall a e.
+    (ColorTuple a, Expr.Result e) =>
+    ColorFunction2 (ColorSpace a e) (Function2 a e)
+
+instance Eq ColorFunction2 where
+    ColorFunction2 spaceA funcA == ColorFunction2 spaceB funcB  =
+        case (spaceA, spaceB) of
+            (GraySpace, GraySpace) -> funcA == funcB
+            (RGBSpace, RGBSpace) -> funcA == funcB
+            _ -> False
+
+instance Ord ColorFunction2 where
+    compare (ColorFunction2 spaceA funcA) (ColorFunction2 spaceB funcB) =
+        case (spaceA, spaceB) of
+            (GraySpace, GraySpace) -> compare funcA funcB
+            (RGBSpace, RGBSpace) -> compare funcA funcB
+            (GraySpace, RGBSpace) -> LT
+            (RGBSpace, GraySpace) -> GT
+
+
 -- ToDo: with custom Eq and Ord instances we can save the Formula wrapper
 data Function1 a e =
       Sampled1 (Array Int a)
@@ -814,12 +895,14 @@ data Function1 a e =
 calculator1 :: (ExprFloat -> e) -> Function1 a e
 calculator1 = Calculator1 . Formula
 
-instance PdfResourceObject (Function1 FloatRGB ExprRGB) where
+instance
+    (ColorTuple a, Expr.Result e) =>
+        PdfResourceObject (Function1 a e) where
     toRsrc func =
         let domain =
                 M.fromList [
                     entry "Domain" [0,1::Int],
-                    entry "Range" [0,1, 0,1, 0,1::Int]
+                    rangeEntry func
                 ] in
 
         case func of
@@ -839,12 +922,14 @@ data Function2 a e =
 calculator2 :: (ExprFloat -> ExprFloat -> e) -> Function2 a e
 calculator2 = Calculator2 . Formula
 
-instance PdfResourceObject (Function2 FloatRGB ExprRGB) where
+instance
+    (ColorTuple a, Expr.Result e) =>
+        PdfResourceObject (Function2 a e) where
     toRsrc func =
         let domain =
                 M.fromList [
                     entry "Domain" [0,1, 0,1::Int],
-                    entry "Range" [0,1, 0,1, 0,1::Int]
+                    rangeEntry func
                 ] in
 
         case func of
@@ -858,31 +943,35 @@ instance PdfResourceObject (Function2 FloatRGB ExprRGB) where
 
 
 -- | A shading
-data PDFShading = FunctionalShading Matrix (Function2 FloatRGB ExprRGB)
-                | AxialShading PDFFloat PDFFloat PDFFloat PDFFloat (Function1 FloatRGB ExprRGB)
-                | RadialShading PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat (Function1 FloatRGB ExprRGB)
+data PDFShading =
+      FunctionalShading Matrix ColorFunction2
+    | AxialShading PDFFloat PDFFloat PDFFloat PDFFloat ColorFunction1
+    | RadialShading PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat PDFFloat ColorFunction1
                 deriving(Eq,Ord)
 
 matrixCoefficients :: Matrix -> [PDFFloat]
 matrixCoefficients (Matrix a b c d e f) = [a,b,c,d,e,f]
 
 instance PdfResourceObject PDFShading where
-      toRsrc (FunctionalShading mat func) = AnyPdfObject . PDFDictionary . M.fromList $
+      toRsrc (FunctionalShading mat (ColorFunction2 cs func)) =
+          AnyPdfObject . PDFDictionary . M.fromList $
                                  [ entry "ShadingType" (PDFInteger $ 1)
                                  , entry "Matrix" (matrixCoefficients $ mat)
-                                 , entry "ColorSpace" (PDFName $ "DeviceRGB")
+                                 , colorSpaceEntry cs
                                  , entry "Function" (toRsrc func)
                                  ]
-      toRsrc (AxialShading x0 y0 x1 y1 func) = AnyPdfObject . PDFDictionary . M.fromList $
+      toRsrc (AxialShading x0 y0 x1 y1 (ColorFunction1 cs func)) =
+          AnyPdfObject . PDFDictionary . M.fromList $
                                  [ entry "ShadingType" (PDFInteger $ 2)
                                  , entry "Coords" [x0,y0,x1,y1]
-                                 , entry "ColorSpace" (PDFName $ "DeviceRGB")
+                                 , colorSpaceEntry cs
                                  , entry "Function" (toRsrc func)
                                  ]
-      toRsrc (RadialShading x0 y0 r0 x1 y1 r1 func) = AnyPdfObject . PDFDictionary . M.fromList $
+      toRsrc (RadialShading x0 y0 r0 x1 y1 r1 (ColorFunction1 cs func)) =
+          AnyPdfObject . PDFDictionary . M.fromList $
                                          [ entry "ShadingType" (PDFInteger $ 3)
                                          , entry "Coords" [x0,y0,r0,x1,y1,r1]
-                                         , entry "ColorSpace" (PDFName $ "DeviceRGB")
+                                         , colorSpaceEntry cs
                                          , entry "Function" (toRsrc func)
                                          ]
 
