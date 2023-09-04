@@ -55,8 +55,8 @@ module Graphics.PDF
   -- ** Shading
   , module Graphics.PDF.Shading
   , Formula(..)
-  , formula1
-  , formula2
+  , calculator1
+  , calculator2
   , Function1(..)
   , Function2(..)
   -- ** Fonts

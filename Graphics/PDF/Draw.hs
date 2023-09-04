@@ -73,8 +73,8 @@ module Graphics.PDF.Draw(
  , AnnotationStyle(..)
  , PDFShading(..)
  , Formula(..)
- , formula1
- , formula2
+ , calculator1
+ , calculator2
  , Function1(..)
  , Function2(..)
  , getRgbColor
@@ -808,11 +808,11 @@ instance (Expr.Function a) => Ord (Formula a) where
 data Function1 a e =
       Sampled1 (Array Int a)
     | Interpolated1 PDFFloat a a
-    | Formula1 (Formula (ExprFloat -> e))
+    | Calculator1 (Formula (ExprFloat -> e))
     deriving (Eq, Ord)
 
-formula1 :: (ExprFloat -> e) -> Function1 a e
-formula1 = Formula1 . Formula
+calculator1 :: (ExprFloat -> e) -> Function1 a e
+calculator1 = Calculator1 . Formula
 
 instance PdfResourceObject (Function1 FloatRGB ExprRGB) where
     toRsrc func =
@@ -828,16 +828,16 @@ instance PdfResourceObject (Function1 FloatRGB ExprRGB) where
 
             Interpolated1 n x y -> rsrcFromInterpolated domain n x y
 
-            Formula1 (Formula f) -> rsrcFromFormula domain f
+            Calculator1 (Formula f) -> rsrcFromFormula domain f
 
 
 data Function2 a e =
       Sampled2 (Array (Int,Int) a)
-    | Formula2 (Formula (ExprFloat -> ExprFloat -> e))
+    | Calculator2 (Formula (ExprFloat -> ExprFloat -> e))
     deriving (Eq, Ord)
 
-formula2 :: (ExprFloat -> ExprFloat -> e) -> Function2 a e
-formula2 = Formula2 . Formula
+calculator2 :: (ExprFloat -> ExprFloat -> e) -> Function2 a e
+calculator2 = Calculator2 . Formula
 
 instance PdfResourceObject (Function2 FloatRGB ExprRGB) where
     toRsrc func =
@@ -854,7 +854,7 @@ instance PdfResourceObject (Function2 FloatRGB ExprRGB) where
                     (\((lx,ly), (ux,uy)) -> [Array.rangeSize (lx,ux), Array.rangeSize (ly,uy)])
                     arr
 
-            Formula2 (Formula f) -> rsrcFromFormula domain f
+            Calculator2 (Formula f) -> rsrcFromFormula domain f
 
 
 -- | A shading
