@@ -320,6 +320,9 @@ insertInPdfDict key obj (PDFDictionary d) = PDFDictionary $ M.insert key obj d
 pdfDictUnion :: PDFDictionary -> PDFDictionary -> PDFDictionary
 pdfDictUnion (PDFDictionary a) (PDFDictionary b) = PDFDictionary $ M.union a b
 
+dictFromList :: [(PDFName, AnyPdfObject)] -> PDFDictionary
+dictFromList = PDFDictionary . M.fromList
+
   
 -- | A PDF rectangle
 data PDFRect = PDFRect !Double !Double !Double !Double

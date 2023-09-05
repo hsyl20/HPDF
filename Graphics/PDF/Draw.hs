@@ -254,7 +254,7 @@ instance PdfObject PDFStream where
    where
       compressedStream False = []
       compressedStream True = if not (pdfDictMember (PDFName "Filter") d) then [entry "Filter" [AnyPdfObject . PDFName $ "FlateDecode"]] else []
-      lenDict = PDFDictionary. M.fromList $ [entry "Length" l] ++ compressedStream c
+      lenDict = dictFromList $ [entry "Length" l] ++ compressedStream c
       dict = pdfDictUnion lenDict d
 
 instance PdfLengthInfo PDFStream where 
@@ -539,7 +539,7 @@ data PDFViewerPreferences = PDFViewerPreferences { hideToolbar :: Bool -- ^ To h
 data PDFOutline = PDFOutline !(PDFReference PDFOutlineEntry) !(PDFReference PDFOutlineEntry)
 
 instance PdfObject PDFOutline where
- toPDF (PDFOutline first lasto) = toPDF $ PDFDictionary. M.fromList $ [
+ toPDF (PDFOutline first lasto) = toPDF $ dictFromList $ [
     entry "Type" (PDFName $ "Outlines")
   , entry "First" first
   , entry "Last" lasto
@@ -581,7 +581,7 @@ data OutlineCtx a = Top | Child { value :: a
 data OutlineLoc  a = OutlineLoc (Tree a) (OutlineCtx a)
 
 instance PdfObject PDFViewerPreferences where
-  toPDF (PDFViewerPreferences ht hm hwui fw cw ddt nfspm ) = toPDF $ PDFDictionary. M.fromList $ 
+  toPDF (PDFViewerPreferences ht hm hwui fw cw ddt nfspm ) = toPDF $ dictFromList $
    [ entry "HideToolbar" ht
    , entry "HideMenubar" hm
    , entry "HideWindowUI" hwui
@@ -603,7 +603,7 @@ instance Show PDFTransStyle where
    show (Glitter _) = "Glitter"
 
 instance PdfObject PDFTransition where
- toPDF (PDFTransition d t) = toPDF $ PDFDictionary. M.fromList $ 
+ toPDF (PDFTransition d t) = toPDF $ dictFromList $
    [ entry "Type" (PDFName "Trans")
    , entry "S" (PDFName (show t))
    , entry "D" d
@@ -624,12 +624,12 @@ instance PdfLengthInfo PDFTransition where
 -- PDF Pages
 
 instance PdfObject PDFPages where
- toPDF (PDFPages c Nothing l) = toPDF $ PDFDictionary. M.fromList $ 
+ toPDF (PDFPages c Nothing l) = toPDF $ dictFromList $
   [ entry "Type" (PDFName "Pages")
   , entry "Kids" l
   , entry "Count" (PDFInteger $ c)
   ]
- toPDF (PDFPages c (Just theParent) l) = toPDF $ PDFDictionary. M.fromList $ 
+ toPDF (PDFPages c (Just theParent) l) = toPDF $ dictFromList $
   [ entry "Type" (PDFName "Pages")
   , entry "Parent" theParent
   , entry "Kids" l
@@ -640,7 +640,7 @@ instance PdfLengthInfo PDFPages where
 
 
 instance PdfObject PDFPage where
- toPDF (PDFPage (Just theParent) box content theRsrc d t theAnnots) = toPDF $ PDFDictionary. M.fromList $ 
+ toPDF (PDFPage (Just theParent) box content theRsrc d t theAnnots) = toPDF $ dictFromList $
   [ entry "Type" (PDFName "Page")
   , entry "Parent" theParent
   , entry "MediaBox" box
@@ -660,7 +660,7 @@ instance PdfLengthInfo PDFPage where
 -- Main objects in a PDF document
 
 instance PdfObject PDFCatalog where
- toPDF (PDFCatalog outlines lPages pgMode pgLayout viewerPrefs) = toPDF $ PDFDictionary . M.fromList $ 
+ toPDF (PDFCatalog outlines lPages pgMode pgLayout viewerPrefs) = toPDF $ dictFromList $
    [ entry "Type" (PDFName "Catalog")
    , entry "Pages" lPages
    , entry "PageMode" (PDFName . show $ pgMode)
@@ -679,7 +679,7 @@ instance PdfLengthInfo OutlineStyle where
 
 instance PdfObject PDFOutlineEntry where
  toPDF (PDFOutlineEntry title theParent prev next first theLast count dest color style) = 
-     toPDF $ PDFDictionary. M.fromList $ [
+     toPDF $ dictFromList $ [
         entry "Title" title
         , entry "Parent" theParent
         ]
@@ -769,7 +769,7 @@ byteFromFloat x = round $ min 255 $ max 0 $ x*255
 
 rsrcFromSampled ::
     (ColorTuple a) =>
-    M.Map PDFName AnyPdfObject ->
+    PDFDictionary ->
     ((i, i) -> [Int]) -> Array i a -> AnyPdfObject
 rsrcFromSampled domain computeSizes arr =
     let stream =
@@ -781,7 +781,7 @@ rsrcFromSampled domain computeSizes arr =
         (BU.fromLazyByteString stream)
         False
         (PDFReference . fromIntegral . B.length $ stream)
-        (PDFDictionary . M.union domain . M.fromList $
+        (pdfDictUnion domain . dictFromList $
            [entry "FunctionType" (PDFInteger 0),
             entry "Size" (computeSizes $ Array.bounds arr),
             entry "BitsPerSample" (PDFInteger 8),
@@ -791,9 +791,9 @@ rsrcFromSampled domain computeSizes arr =
 -- | Interpolation function
 rsrcFromInterpolated ::
     (ColorTuple a) =>
-    M.Map PDFName AnyPdfObject -> PDFFloat -> a -> a -> AnyPdfObject
+    PDFDictionary -> PDFFloat -> a -> a -> AnyPdfObject
 rsrcFromInterpolated domain n a b =
-    AnyPdfObject . PDFDictionary . M.union domain . M.fromList $
+    AnyPdfObject . pdfDictUnion domain . dictFromList $
                             [ entry "FunctionType" (PDFInteger $ 2)
                             , entry "C0" (colorComponents a)
                             , entry "C1" (colorComponents b)
@@ -801,7 +801,7 @@ rsrcFromInterpolated domain n a b =
                             ]
 
 rsrcFromFormula ::
-    (Expr.Function f) => M.Map PDFName AnyPdfObject -> f -> AnyPdfObject
+    (Expr.Function f) => PDFDictionary -> f -> AnyPdfObject
 rsrcFromFormula domain f =
     let stream = C.cons '{' $ C.snoc (Expr.serialize f) '}' in
     AnyPdfObject $
@@ -809,7 +809,7 @@ rsrcFromFormula domain f =
         (BU.fromLazyByteString stream)
         False
         (PDFReference . fromIntegral . B.length $ stream)
-        (PDFDictionary . M.union domain . M.fromList $
+        (pdfDictUnion domain . dictFromList $
             [entry "FunctionType" (PDFInteger 4)])
 
 
@@ -900,7 +900,7 @@ instance
         PdfResourceObject (Function1 a e) where
     toRsrc func =
         let domain =
-                M.fromList [
+                dictFromList [
                     entry "Domain" [0,1::Int],
                     rangeEntry func
                 ] in
@@ -927,7 +927,7 @@ instance
         PdfResourceObject (Function2 a e) where
     toRsrc func =
         let domain =
-                M.fromList [
+                dictFromList [
                     entry "Domain" [0,1, 0,1::Int],
                     rangeEntry func
                 ] in
@@ -954,21 +954,21 @@ matrixCoefficients (Matrix a b c d e f) = [a,b,c,d,e,f]
 
 instance PdfResourceObject PDFShading where
       toRsrc (FunctionalShading mat (ColorFunction2 cs func)) =
-          AnyPdfObject . PDFDictionary . M.fromList $
+          AnyPdfObject . dictFromList $
                                  [ entry "ShadingType" (PDFInteger $ 1)
                                  , entry "Matrix" (matrixCoefficients $ mat)
                                  , colorSpaceEntry cs
                                  , entry "Function" (toRsrc func)
                                  ]
       toRsrc (AxialShading x0 y0 x1 y1 (ColorFunction1 cs func)) =
-          AnyPdfObject . PDFDictionary . M.fromList $
+          AnyPdfObject . dictFromList $
                                  [ entry "ShadingType" (PDFInteger $ 2)
                                  , entry "Coords" [x0,y0,x1,y1]
                                  , colorSpaceEntry cs
                                  , entry "Function" (toRsrc func)
                                  ]
       toRsrc (RadialShading x0 y0 r0 x1 y1 r1 (ColorFunction1 cs func)) =
-          AnyPdfObject . PDFDictionary . M.fromList $
+          AnyPdfObject . dictFromList $
                                          [ entry "ShadingType" (PDFInteger $ 3)
                                          , entry "Coords" [x0,y0,r0,x1,y1,r1]
                                          , colorSpaceEntry cs
