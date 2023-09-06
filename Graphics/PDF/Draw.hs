@@ -36,6 +36,7 @@ module Graphics.PDF.Draw(
 -- , writeCmd
  , runDrawing
  , setResource
+ , registerResource
  , emptyEnvironment
  , PDFXForm
  , PDFXObject(..)
@@ -336,6 +337,20 @@ setResource dict values oldCache = do
              return (newName,M.insert values newName oldCache)
         Just n -> return (n,oldCache)
 
+-- ToDo: setter and getter could be replaced by an Accessor or a Lens
+registerResource ::
+    (Ord a, PdfResourceObject a) =>
+    String ->
+    (DrawState -> M.Map a String) ->
+    (M.Map a String -> DrawState -> DrawState) ->
+    a -> Draw String
+registerResource dict getMap setMap resource = do
+    oldMap <- gets getMap
+    (newName,newMap) <- setResource dict resource oldMap
+    modifyStrict $ setMap newMap
+    return newName
+
+
 instance PDFGlobals Draw where
     bounds (PDFReference r) = getBoundInDraw r
     
@@ -348,9 +363,10 @@ class PDFXObject a where
     
     privateDrawXObject :: PDFReference a -> Draw ()
     privateDrawXObject (PDFReference r) = do
-        xobjectMap <- gets xobjects
-        (newName,newMap) <- setResource "XObject" (PDFReference r) xobjectMap
-        modifyStrict $ \s -> s { xobjects = newMap }
+        newName <-
+            registerResource "XObject"
+                xobjects (\newMap s -> s { xobjects = newMap })
+                (PDFReference r)
         tell . mconcat  $ [ serialize "\n/" 
                           , serialize newName
                           , serialize " Do"

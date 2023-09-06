@@ -18,8 +18,6 @@ module Graphics.PDF.Shading(
  ) where
      
 import Graphics.PDF.Draw
-import Graphics.PDF.LowLevel.Types
-import Control.Monad.State(gets)
 import Graphics.PDF.Shapes(setAsClipPath)
 import Control.Monad.Writer
 import Graphics.PDF.LowLevel.Serializer
@@ -27,9 +25,10 @@ import Graphics.PDF.LowLevel.Serializer
 -- | Fill clipping region with a shading
 applyShading :: PDFShading -> Draw ()
 applyShading shade = do
-    shadingMap <- gets shadings
-    (newName,newMap) <- setResource "Shading" shade shadingMap
-    modifyStrict $ \s -> s { shadings = newMap }
+    newName <-
+        registerResource "Shading"
+            shadings (\newMap s -> s { shadings = newMap })
+            shade
     tell . mconcat $[ serialize "\n/" 
                     , serialize newName
                     , serialize " sh"

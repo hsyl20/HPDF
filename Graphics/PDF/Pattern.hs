@@ -94,28 +94,31 @@ createTilingPattern xa ya xb yb hstep vstep pt tt d =
        PDFReference s <- createContent a' Nothing  
        recordBound s (xb-xa) (yb-ya)
        return s
-      
-       
+
+
+registerPattern :: PDFReference s -> Draw String
+registerPattern (PDFReference a) =
+    registerResource "Pattern"
+        patterns (\newMap s -> s { patterns = newMap })
+        (PDFReference a)
+
 -- | Set the fill pattern
 setColoredFillPattern :: PDFReference PDFColoredPattern -> Draw ()
-setColoredFillPattern (PDFReference a) = do
-     patternMap <- gets patterns
-     (newName,newMap) <- setResource "Pattern" (PDFReference a) patternMap
-     modifyStrict $ \s -> s { patterns = newMap }
-     tell . serialize $ ("\n/Pattern cs")
-     tell . mconcat $[ serialize "\n/" 
+setColoredFillPattern ref = do
+    newName <- registerPattern ref
+    tell . serialize $ ("\n/Pattern cs")
+    tell . mconcat $ [ serialize "\n/"
                      , serialize newName
                      , serialize " scn"
                      ]
      
 -- | Set the stroke pattern
 setColoredStrokePattern :: PDFReference PDFColoredPattern -> Draw ()
-setColoredStrokePattern (PDFReference a) = do
-  patternMap <- gets patterns
-  (newName,newMap) <- setResource "Pattern" (PDFReference a) patternMap
-  modifyStrict $ \s -> s { patterns = newMap }
-  tell . serialize $ ("\n/Pattern CS")
-  tell . mconcat $[ serialize "\n/" 
+setColoredStrokePattern ref = do
+    newName <- registerPattern ref
+    tell . serialize $ ("\n/Pattern CS")
+    tell . mconcat $
+                  [ serialize "\n/"
                   , serialize newName
                   , serialize " SCN"
                   ]
@@ -124,14 +127,12 @@ setColoredStrokePattern (PDFReference a) = do
 
 -- | Set the fill pattern
 setUncoloredFillPattern :: PDFReference PDFUncoloredPattern -> Color -> Draw ()
-setUncoloredFillPattern (PDFReference a) col = do
+setUncoloredFillPattern ref col = do
        let (r,g,b) = getRgbColor col
        colorMap <- gets colorSpaces
        (newColorName,_) <- setResource "ColorSpace" PatternRGB colorMap
-       patternMap <- gets patterns
-       (newName,newMap) <- setResource "Pattern" (PDFReference a) patternMap
-       modifyStrict $ \s -> s { patterns = newMap }
-       tell . mconcat $[ serialize "\n/" 
+       newName <- registerPattern ref
+       tell . mconcat $[ serialize "\n/"
                        , serialize newColorName
                        , serialize " cs"
                        ]
@@ -149,13 +150,11 @@ setUncoloredFillPattern (PDFReference a) col = do
 
 -- | Set the stroke pattern
 setUncoloredStrokePattern :: PDFReference PDFUncoloredPattern -> Color -> Draw ()
-setUncoloredStrokePattern (PDFReference a) col = do
+setUncoloredStrokePattern ref col = do
     let (r,g,b) = getRgbColor col
     colorMap <- gets colorSpaces
     (newColorName,_) <- setResource "ColorSpace" PatternRGB colorMap
-    patternMap <- gets patterns
-    (newName,newMap) <- setResource "Pattern" (PDFReference a) patternMap
-    modifyStrict $ \s -> s { patterns = newMap }
+    newName <- registerPattern ref
     tell . mconcat $[ serialize "\n/" 
                     , serialize newColorName
                     , serialize " CS"

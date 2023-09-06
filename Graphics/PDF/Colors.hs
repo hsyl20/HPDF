@@ -30,7 +30,6 @@ module Graphics.PDF.Colors(
      
 import Graphics.PDF.Draw
 import Graphics.PDF.LowLevel.Types
-import Control.Monad.State(gets)
 import Graphics.PDF.Resources
 import Control.Monad.Writer
 import Graphics.PDF.LowLevel.Serializer
@@ -55,20 +54,22 @@ blue = Rgb 0 0 1
 -- | Set alpha value for transparency
 setStrokeAlpha :: Double -> Draw ()
 setStrokeAlpha alpha = do
-    alphaMap <- gets strokeAlphas
-    (newName,newMap) <- setResource "ExtGState" (StrokeAlpha alpha) alphaMap
-    modifyStrict $ \s -> s { strokeAlphas = newMap }
+    newName <-
+        registerResource "ExtGState"
+            strokeAlphas (\newMap s -> s { strokeAlphas = newMap })
+            (StrokeAlpha alpha)
     tell . mconcat $[ serialize "\n/" 
                     , serialize newName
                     , serialize " gs"
                     ]
-        
+
 -- | Set alpha value for transparency
 setFillAlpha :: Double -> Draw ()
 setFillAlpha alpha = do
-    alphaMap <- gets fillAlphas
-    (newName,newMap) <- setResource "ExtGState" (FillAlpha alpha) alphaMap
-    modifyStrict $ \s -> s { fillAlphas = newMap }
+    newName <-
+        registerResource "ExtGState"
+            fillAlphas (\newMap s -> s { fillAlphas = newMap })
+            (FillAlpha alpha)
     tell . mconcat $[ serialize "\n/" 
                     , serialize newName
                     , serialize " gs"
