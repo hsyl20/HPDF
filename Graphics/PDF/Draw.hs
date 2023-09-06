@@ -91,8 +91,7 @@ module Graphics.PDF.Draw(
  , multiplyCurrentMatrixWith
  , PDFGlobals(..)
  ) where
- 
-import Data.Maybe
+
 #if !MIN_VERSION_base(4,8,0)
 import Data.Monoid
 #endif
@@ -645,11 +644,9 @@ instance PdfObject PDFPage where
   , entry "Parent" theParent
   , entry "MediaBox" box
   , entry "Contents" content
-  , if isJust theRsrc
-      then
-       entry "Resources" (fromJust $ theRsrc)
-      else 
-       entry "Resources" emptyDictionary
+  , case theRsrc of
+      Just res -> entry "Resources" res
+      Nothing -> entry "Resources" emptyDictionary
   ] ++ (maybe [] (\x -> [entry "Dur" x]) d)
   ++ (maybe [] (\x -> [entry "Trans" x]) t)
   ++ ((\x -> if null x then [] else [entry "Annots" x]) theAnnots)
