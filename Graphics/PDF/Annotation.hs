@@ -93,19 +93,19 @@ getBorder False = [0,0,0]
 getBorder True = [0,0,1]
 
 standardAnnotationDict :: AnnotationObject a => a -> [(PDFName,AnyPdfObject)]
-standardAnnotationDict a = [(PDFName "Type",AnyPdfObject . PDFName $ "Annot")
-                         , (PDFName "Subtype",AnyPdfObject $ annotationType a)
-                         , (PDFName "Rect",AnyPdfObject . map AnyPdfObject $ annotationRect a)
-                         , (PDFName "Contents",AnyPdfObject $ annotationContent a)
+standardAnnotationDict a = [entry "Type" (PDFName $ "Annot")
+                         , entry "Subtype" (annotationType a)
+                         , entry "Rect" (annotationRect a)
+                         , entry "Contents" (annotationContent a)
                          ]
 
 --instance PdfObject Screen where
 --   toPDF a@(Screen _ _ _ p play stop) = toPDF . dictFromList $
---        standardAnnotationDict a ++ [(PDFName "P",AnyPdfObject p)]
---                                    ++ (maybe [] (\x -> [(PDFName "A",AnyPdfObject x)]) play)
---                                    ++ (maybe [] (\x -> [(PDFName "AA",AnyPdfObject $ otherActions x)]) stop)
+--        standardAnnotationDict a ++ [entry "P" p]
+--                                    ++ (maybe [] (\x -> [entry "A" x]) play)
+--                                    ++ (maybe [] (\x -> [entry "AA" (otherActions x)]) stop)
 --         where
---             otherActions x = dictFromList $ [(PDFName "D",AnyPdfObject x)]
+--             otherActions x = dictFromList $ [entry "D" x]
 --
 --instance AnnotationObject Screen where
 --  addAnnotation (Screen video s rect p _ _) = do
@@ -120,7 +120,7 @@ standardAnnotationDict a = [(PDFName "Type",AnyPdfObject . PDFName $ "Annot")
                              
 instance PdfObject TextAnnotation where
       toPDF a@(TextAnnotation _ _ i) = toPDF . dictFromList $
-           standardAnnotationDict a ++ [(PDFName "Name",AnyPdfObject . PDFName $ show i)]
+           standardAnnotationDict a ++ [entry "Name" (PDFName $ show i)]
 
 instance PdfLengthInfo TextAnnotation where
 
@@ -136,8 +136,8 @@ instance AnnotationObject TextAnnotation where
 instance PdfObject URLLink where
     toPDF a@(URLLink _ _ url border) = toPDF . dictFromList $
            standardAnnotationDict a ++ 
-            [ (PDFName "A",AnyPdfObject (GoToURL url))
-            , (PDFName "Border",AnyPdfObject . map AnyPdfObject $ (getBorder border))
+            [ entry "A" (GoToURL url)
+            , entry "Border" (getBorder border)
             ]
 
 instance PdfLengthInfo URLLink where
@@ -154,8 +154,8 @@ instance AnnotationObject URLLink where
 instance PdfObject PDFLink where
     toPDF a@(PDFLink _ _ page x y border) = toPDF . dictFromList $
                standardAnnotationDict a ++ 
-                [(PDFName "Dest",AnyPdfObject dest)
-                ,(PDFName "Border",AnyPdfObject . map AnyPdfObject $ (getBorder border))]
+                [entry "Dest" dest
+                ,entry "Border" (getBorder border)]
      where
          dest =  [ AnyPdfObject page
                  , AnyPdfObject (PDFName "XYZ")

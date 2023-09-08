@@ -150,7 +150,7 @@ createStreams = do
          case p of
              -- Not linked to a page
              Nothing -> do                  
-                  return $ (otherRsrcs state') `pdfDictUnion` (dictFromList  $ [(PDFName "Resources",AnyPdfObject rsrcRef)])
+                  return $ (otherRsrcs state') `pdfDictUnion` (dictFromList  $ [entry "Resources" rsrcRef])
              -- Linked to a page
              Just pageRef -> do
                   setPageAnnotations (annots state') pageRef
@@ -200,14 +200,14 @@ data PDFTrailer
     
 instance PdfObject PDFTrailer where
    toPDF (PDFTrailer size root infos) = toPDF $ dictFromList $
-     [ (PDFName "Size",AnyPdfObject . PDFInteger $ size)
-     , (PDFName "Root",AnyPdfObject root)
-     , (PDFName "Info",AnyPdfObject . dictFromList $ allInfos)
+     [ entry "Size" (PDFInteger $ size)
+     , entry "Root" root
+     , entry "Info" (dictFromList $ allInfos)
      ]
      where
-      allInfos = [ (PDFName "Author",AnyPdfObject . toPDFString . author $ infos)
-                 , (PDFName "Subject",AnyPdfObject . toPDFString . subject $ infos)
-                 , (PDFName "Producer",AnyPdfObject $ toPDFString (T.pack "HPDF - The Haskell PDF Library" ))
+      allInfos = [ entry "Author" (toPDFString . author $ infos)
+                 , entry "Subject" (toPDFString . subject $ infos)
+                 , entry "Producer" (toPDFString (T.pack "HPDF - The Haskell PDF Library" ))
                  ]
 
 instance PdfLengthInfo PDFTrailer where

@@ -78,14 +78,14 @@ createTilingPattern :: PDFFloat -- ^ Left
                     -> PDF Int
 createTilingPattern xa ya xb yb hstep vstep pt tt d = 
     let a' = do modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
-                                             [ (PDFName "Type",AnyPdfObject . PDFName $ "Pattern")
-                                             , (PDFName "PatternType",AnyPdfObject . PDFInteger $ 1)
-                                             , (PDFName "PaintType",AnyPdfObject . PDFInteger $ (fromEnum pt) + 1)
-                                             , (PDFName "TilingType",AnyPdfObject . PDFInteger $ (fromEnum tt) + 1)
-                                             , (PDFName "Matrix",AnyPdfObject . (map (AnyPdfObject . PDFInteger)) $ [1,0,0,1,0,0])
-                                             , (PDFName "BBox",AnyPdfObject . map AnyPdfObject  $ [xa,ya,xb,yb])
-                                             , (PDFName "XStep",AnyPdfObject hstep)
-                                             , (PDFName "YStep",AnyPdfObject vstep)
+                                             [ entry "Type" (PDFName $ "Pattern")
+                                             , entry "PatternType" (PDFInteger $ 1)
+                                             , entry "PaintType" (PDFInteger $ (fromEnum pt) + 1)
+                                             , entry "TilingType" (PDFInteger $ (fromEnum tt) + 1)
+                                             , entry "Matrix" (map PDFInteger $ [1,0,0,1,0,0])
+                                             , entry "BBox" [xa,ya,xb,yb]
+                                             , entry "XStep" hstep
+                                             , entry "YStep" vstep
                                              ]
                                          }
                 d

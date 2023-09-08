@@ -37,16 +37,16 @@ newtype GoToURL = GoToURL URI
 --data Rendition = Rendition
 --instance PdfObject Rendition where
 --  toPDF a = toPDF . dictFromList $
---                    [ (PDFName "Type",AnyPdfObject . PDFName $ "Rendition")
---                    , (PDFName "S",AnyPdfObject . PDFName $ "MR")
---                    , (PDFName "C",AnyPdfObject movie)
+--                    [ entry "Type" (PDFName $ "Rendition")
+--                    , entry "S" (PDFName $ "MR")
+--                    , entry "C" movie
 --                    ]
 --    where
 --        movie = dictFromList $
---               [ (PDFName "Type",AnyPdfObject . PDFName $ "MediaClip")
---               , (PDFName "S",AnyPdfObject . PDFName $ "MCD")
---               , (PDFName "CT",AnyPdfObject . toPDFString $ "video/3gpp")
---               , (PDFName "D",AnyPdfObject (toPDFString "17.3gp"))
+--               [ entry "Type" (PDFName $ "MediaClip")
+--               , entry "S" (PDFName $ "MCD")
+--               , entry "CT" (toPDFString $ "video/3gpp")
+--               , entry "D" (toPDFString "17.3gp")
 --               ]
 
 --  Action to control a media
@@ -61,9 +61,9 @@ urlToPdfString uri =
 
 instance PdfObject GoToURL where
     toPDF (GoToURL s) = toPDF . dictFromList $
-                         [ (PDFName "Type",AnyPdfObject . PDFName $ "Action")
-                         , (PDFName "S",AnyPdfObject (PDFName "URI"))
-                         , (PDFName "URI",AnyPdfObject (urlToPdfString s))
+                         [ entry "Type" (PDFName $ "Action")
+                         , entry "S" (PDFName "URI")
+                         , entry "URI" (urlToPdfString s)
                          ]
 instance Action GoToURL
 
@@ -72,11 +72,11 @@ instance PdfLengthInfo GoToURL where
 
 --instance PdfObject ControlMedia where
 --    toPDF (ControlMedia operation relatedScreenAnnotation rendition) = toPDF . dictFromList $
---                         [ (PDFName "Type",AnyPdfObject . PDFName $ "Action")
---                         , (PDFName "S",AnyPdfObject (PDFName "Rendition"))
---                         , (PDFName "R",AnyPdfObject rendition)
---                         , (PDFName "OP",AnyPdfObject . PDFInteger $ (fromEnum operation))
---                         , (PDFName "AN",AnyPdfObject $ (PDFReference relatedScreenAnnotation :: PDFReference AnyPdfObject))
+--                         [ entry "Type" (PDFName $ "Action")
+--                         , entry "S" (PDFName "Rendition")
+--                         , entry "R" rendition
+--                         , entry "OP" (PDFInteger $ fromEnum operation)
+--                         , entry "AN" ((PDFReference relatedScreenAnnotation :: PDFReference AnyPdfObject))
 --                         ]
 --                         
 --instance Action ControlMedia

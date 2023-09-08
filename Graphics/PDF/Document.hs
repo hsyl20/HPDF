@@ -65,11 +65,11 @@ createPDFXForm :: PDFFloat -- ^ Left
               -> Draw a -- ^ Drawing commands
               -> PDF (PDFReference PDFXForm)
 createPDFXForm xa ya xb yb d = let a' = do modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
-                                                                       [ (PDFName "Type",AnyPdfObject . PDFName $ "XObject")
-                                                                       , (PDFName "Subtype",AnyPdfObject . PDFName $ "Form")
-                                                                       , (PDFName "FormType",AnyPdfObject . PDFInteger $ 1)
-                                                                       , (PDFName "Matrix",AnyPdfObject . (map (AnyPdfObject . PDFInteger)) $ [1,0,0,1,0,0])
-                                                                       , (PDFName "BBox",AnyPdfObject . (map AnyPdfObject) $ [xa,ya,xb,yb])
+                                                                       [ entry "Type" (PDFName $ "XObject")
+                                                                       , entry "Subtype" (PDFName $ "Form")
+                                                                       , entry "FormType" (PDFInteger $ 1)
+                                                                       , entry "Matrix" (map PDFInteger $ [1,0,0,1,0,0])
+                                                                       , entry "BBox" (map AnyPdfObject $ [xa,ya,xb,yb])
                                                                        ]
                                                                   }
                                            d

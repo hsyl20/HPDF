@@ -35,11 +35,11 @@ import qualified Data.Map.Strict as M
       
 newtype StrokeAlpha = StrokeAlpha Double deriving(Eq,Ord)  
 instance PdfResourceObject StrokeAlpha where
-  toRsrc (StrokeAlpha a) = AnyPdfObject . dictFromList $ [(PDFName "CA",AnyPdfObject a)]
+  toRsrc (StrokeAlpha a) = AnyPdfObject . dictFromList $ [entry "CA" a]
   
 newtype FillAlpha = FillAlpha Double deriving(Eq,Ord)  
 instance PdfResourceObject FillAlpha where
-  toRsrc (FillAlpha a) = AnyPdfObject . dictFromList $ [(PDFName "ca",AnyPdfObject a)]
+  toRsrc (FillAlpha a) = AnyPdfObject . dictFromList $ [entry "ca" a]
   
 class PdfResourceObject a where
       toRsrc :: a -> AnyPdfObject

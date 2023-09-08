@@ -68,13 +68,13 @@ mkType1FontStructure pdfRef (AFMData f)  = do
 instance PdfResourceObject Type1Font where
    toRsrc (Type1Font f ref) =  
                 AnyPdfObject . dictFromList $
-                           [(PDFName "Type",AnyPdfObject . PDFName $ "Font")
-                           , (PDFName "Subtype",AnyPdfObject . PDFName $ "Type1")
-                           , (PDFName "BaseFont",AnyPdfObject . PDFName $ baseFont f)
-                           , (PDFName "FirstChar",AnyPdfObject . PDFInteger $ (fromIntegral firstChar))
-                           , (PDFName "LastChar",AnyPdfObject . PDFInteger $ (fromIntegral lastChar))
-                           , (PDFName "Widths",AnyPdfObject  $ widths)
-                           , (PDFName "FontDescriptor", AnyPdfObject descriptor)
+                           [entry "Type" (PDFName $ "Font")
+                           , entry "Subtype" (PDFName $ "Type1")
+                           , entry "BaseFont" (PDFName $ baseFont f)
+                           , entry "FirstChar" (PDFInteger $ fromIntegral firstChar)
+                           , entry "LastChar" (PDFInteger $ fromIntegral lastChar)
+                           , entry "Widths" widths
+                           , entry "FontDescriptor" descriptor
                            ] 
           where 
             codes = map fst . M.toList $ widthData f
@@ -82,16 +82,15 @@ instance PdfResourceObject Type1Font where
             lastChar = head . reverse . sort $ codes
             findWidth c = PDFInteger . fromIntegral $ M.findWithDefault 0 c (widthData f)
             widths = map findWidth [firstChar .. lastChar] 
-            bbox = map AnyPdfObject .fontBBox $ f 
             descriptor = dictFromList $
-              [ (PDFName "Type",AnyPdfObject . PDFName $ "Font")
-              , (PDFName "Subtype",AnyPdfObject . PDFName $ "Type1")
-              , (PDFName "BaseFont",AnyPdfObject . PDFName $ baseFont f)
-              , (PDFName "FontFile", AnyPdfObject ref)
-              , (PDFName "Flags",AnyPdfObject . PDFInteger . fromIntegral . mkFlags $ f)
-              , (PDFName "FontBBox",AnyPdfObject  $ bbox)
-              , (PDFName "ItalicAngle",AnyPdfObject $ italicAngle f)
-              , (PDFName "Ascent",AnyPdfObject . PDFInteger . fromIntegral $ ascent f)
-              , (PDFName "Descent",AnyPdfObject . PDFInteger . fromIntegral $ descent f)
-              , (PDFName "CapHeight",AnyPdfObject . PDFInteger . fromIntegral $ capHeight f)
+              [ entry "Type" (PDFName $ "Font")
+              , entry "Subtype" (PDFName $ "Type1")
+              , entry "BaseFont" (PDFName $ baseFont f)
+              , entry "FontFile" ref
+              , entry "Flags" (PDFInteger . fromIntegral . mkFlags $ f)
+              , entry "FontBBox" (fontBBox f)
+              , entry "ItalicAngle" (italicAngle f)
+              , entry "Ascent" (PDFInteger . fromIntegral $ ascent f)
+              , entry "Descent" (PDFInteger . fromIntegral $ descent f)
+              , entry "CapHeight" (PDFInteger . fromIntegral $ capHeight f)
                   ]

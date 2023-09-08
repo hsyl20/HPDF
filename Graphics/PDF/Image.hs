@@ -330,21 +330,21 @@ createPDFJpeg (JpegFile bits_per_component width height color_space img) = do
         return (PDFReference s) 
     where
        color c = case c of
-           1 -> [(PDFName "ColorSpace",AnyPdfObject $ PDFName "DeviceGray")]
-           3 -> [(PDFName "ColorSpace",AnyPdfObject $ PDFName "DeviceRGB")]
-           4 -> [(PDFName "ColorSpace",AnyPdfObject $ PDFName "DeviceCMYK")
-                ,(PDFName "Decode",AnyPdfObject . map (AnyPdfObject . PDFInteger) $ [1,0,1,0,1,0,1,0])
+           1 -> [entry "ColorSpace" (PDFName "DeviceGray")]
+           3 -> [entry "ColorSpace" (PDFName "DeviceRGB")]
+           4 -> [entry "ColorSpace" (PDFName "DeviceCMYK")
+                ,entry "Decode" (map PDFInteger $ [1,0,1,0,1,0,1,0])
                 ]
            _ -> error "Jpeg color space not supported"
        a' = 
                  do modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
-                                                   [ (PDFName "Type",AnyPdfObject . PDFName $ "XObject")
-                                                   , (PDFName "Subtype",AnyPdfObject . PDFName $ "Image")
-                                                   , (PDFName "Width",AnyPdfObject . PDFInteger $ width)
-                                                   , (PDFName "Height",AnyPdfObject . PDFInteger $ height)
-                                                   , (PDFName "BitsPerComponent",AnyPdfObject . PDFInteger $ bits_per_component)
-                                                   , (PDFName "Interpolate", AnyPdfObject True)
-                                                   , (PDFName "Filter",AnyPdfObject . PDFName $ "DCTDecode")
+                                                   [ entry "Type" (PDFName $ "XObject")
+                                                   , entry "Subtype" (PDFName $ "Image")
+                                                   , entry "Width" (PDFInteger $ width)
+                                                   , entry "Height" (PDFInteger $ height)
+                                                   , entry "BitsPerComponent" (PDFInteger $ bits_per_component)
+                                                   , entry "Interpolate" True
+                                                   , entry "Filter" (PDFName $ "DCTDecode")
                                                    ] ++ color color_space
                                              }
                     tell img        
@@ -362,23 +362,23 @@ createPDFRawImageFromByteString width height interpolate pdfFilter stream =  do
     where     
         getFilter = case pdfFilter of 
                     NoFilter -> []
-                    ASCIIHexDecode -> [(PDFName "Filter",AnyPdfObject . PDFName $ "ASCIIHexDecode")]
-                    ASCII85Decode -> [(PDFName "Filter",AnyPdfObject . PDFName $ "ASCII85Decode")]
-                    LZWDecode -> [(PDFName "Filter",AnyPdfObject . PDFName $ "LZWDecode")]
-                    FlateDecode -> [(PDFName "Filter",AnyPdfObject . PDFName $ "FlateDecode")]
-                    RunLengthDecode -> [(PDFName "Filter",AnyPdfObject . PDFName $ "RunLengthDecode")]
-                    CCITTFaxDecode -> [(PDFName "Filter",AnyPdfObject . PDFName $ "CCITTFaxDecode")]
-                    DCTDecode -> [(PDFName "Filter",AnyPdfObject . PDFName $ "DCTDecode")]
+                    ASCIIHexDecode -> [entry "Filter" (PDFName $ "ASCIIHexDecode")]
+                    ASCII85Decode -> [entry "Filter" (PDFName $ "ASCII85Decode")]
+                    LZWDecode -> [entry "Filter" (PDFName $ "LZWDecode")]
+                    FlateDecode -> [entry "Filter" (PDFName $ "FlateDecode")]
+                    RunLengthDecode -> [entry "Filter" (PDFName $ "RunLengthDecode")]
+                    CCITTFaxDecode -> [entry "Filter" (PDFName $ "CCITTFaxDecode")]
+                    DCTDecode -> [entry "Filter" (PDFName $ "DCTDecode")]
 
         a' =  do 
                 modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
-                                                   [ (PDFName "Type",AnyPdfObject . PDFName $ "XObject")
-                                                   , (PDFName "Subtype",AnyPdfObject . PDFName $ "Image")
-                                                   , (PDFName "Width",AnyPdfObject . PDFInteger $ width)
-                                                   , (PDFName "Height",AnyPdfObject . PDFInteger $ height)
-                                                   , (PDFName "BitsPerComponent",AnyPdfObject . PDFInteger $ 8)
-                                                   , (PDFName "ColorSpace",AnyPdfObject $ PDFName "DeviceRGB")
-                                                   , (PDFName "Interpolate", AnyPdfObject interpolate)
+                                                   [ entry "Type" (PDFName $ "XObject")
+                                                   , entry "Subtype" (PDFName $ "Image")
+                                                   , entry "Width" (PDFInteger $ width)
+                                                   , entry "Height" (PDFInteger $ height)
+                                                   , entry "BitsPerComponent" (PDFInteger $ 8)
+                                                   , entry "ColorSpace" (PDFName "DeviceRGB")
+                                                   , entry "Interpolate" interpolate
                                                    ] ++ getFilter
                                              }
                 tell . fromLazyByteString $ stream
@@ -403,13 +403,13 @@ createPDFRawImageFromARGB width height interpolate stream =  do
                         
         a' =  do 
                 modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
-                                                   [ (PDFName "Type",AnyPdfObject . PDFName $ "XObject")
-                                                   , (PDFName "Subtype",AnyPdfObject . PDFName $ "Image")
-                                                   , (PDFName "Width",AnyPdfObject . PDFInteger $  width)
-                                                   , (PDFName "Height",AnyPdfObject . PDFInteger $  height)
-                                                   , (PDFName "BitsPerComponent",AnyPdfObject . PDFInteger $ 8)
-                                                   , (PDFName "ColorSpace",AnyPdfObject $ PDFName "DeviceRGB")
-                                                   , (PDFName "Interpolate", AnyPdfObject interpolate)
+                                                   [ entry "Type" (PDFName $ "XObject")
+                                                   , entry "Subtype" (PDFName $ "Image")
+                                                   , entry "Width" (PDFInteger $  width)
+                                                   , entry "Height" (PDFInteger $  height)
+                                                   , entry "BitsPerComponent" (PDFInteger $ 8)
+                                                   , entry "ColorSpace" (PDFName "DeviceRGB")
+                                                   , entry "Interpolate" interpolate
                                                    ]
                                              }
                 tell . fromLazyByteString . B.pack . addPixel . U.toList $ stream  

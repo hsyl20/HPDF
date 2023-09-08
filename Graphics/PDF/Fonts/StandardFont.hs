@@ -87,13 +87,13 @@ data StdFont = StdFont FontStructure deriving Show
 
 instance PdfResourceObject StdFont where
    toRsrc (StdFont f) =  AnyPdfObject . dictFromList $
-                           [(PDFName "Type",AnyPdfObject . PDFName $ "Font")
-                           , (PDFName "Subtype",AnyPdfObject . PDFName $ "Type1")
-                           , (PDFName "BaseFont",AnyPdfObject . PDFName $ baseFont f)
+                           [entry "Type" (PDFName $ "Font")
+                           , entry "Subtype" (PDFName $ "Type1")
+                           , entry "BaseFont" (PDFName $ baseFont f)
                            ] ++ encoding'
           where encoding' | baseFont f == show Symbol = [] 
                           | baseFont f == show ZapfDingbats = []
-                          | otherwise = [(PDFName "Encoding",AnyPdfObject . PDFName $ "MacRomanEncoding")]
+                          | otherwise = [entry "Encoding" (PDFName $ "MacRomanEncoding")]
 
 instance IsFont StdFont where 
   getDescent (StdFont fs) s = trueSize s $ descent fs 
