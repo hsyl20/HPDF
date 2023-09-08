@@ -86,7 +86,7 @@ embeddedFont ZapfDingbats = $(embedFile "Core14_AFMs/ZapfDingbats.afm")
 data StdFont = StdFont FontStructure deriving Show
 
 instance PdfResourceObject StdFont where
-   toRsrc (StdFont f) =  AnyPdfObject . PDFDictionary . M.fromList $
+   toRsrc (StdFont f) =  AnyPdfObject . dictFromList $
                            [(PDFName "Type",AnyPdfObject . PDFName $ "Font")
                            , (PDFName "Subtype",AnyPdfObject . PDFName $ "Type1")
                            , (PDFName "BaseFont",AnyPdfObject . PDFName $ baseFont f)

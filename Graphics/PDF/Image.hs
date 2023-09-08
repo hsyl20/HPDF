@@ -32,7 +32,6 @@ module Graphics.PDF.Image(
  ) where
      
 import Graphics.PDF.LowLevel.Types
-import qualified Data.Map.Strict as M
 import Graphics.PDF.Draw
 import Graphics.PDF.Resources
 import Graphics.PDF.Pages
@@ -338,7 +337,7 @@ createPDFJpeg (JpegFile bits_per_component width height color_space img) = do
                 ]
            _ -> error "Jpeg color space not supported"
        a' = 
-                 do modifyStrict $ \s -> s  {otherRsrcs = PDFDictionary. M.fromList $ 
+                 do modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
                                                    [ (PDFName "Type",AnyPdfObject . PDFName $ "XObject")
                                                    , (PDFName "Subtype",AnyPdfObject . PDFName $ "Image")
                                                    , (PDFName "Width",AnyPdfObject . PDFInteger $ width)
@@ -372,7 +371,7 @@ createPDFRawImageFromByteString width height interpolate pdfFilter stream =  do
                     DCTDecode -> [(PDFName "Filter",AnyPdfObject . PDFName $ "DCTDecode")]
 
         a' =  do 
-                modifyStrict $ \s -> s  {otherRsrcs = PDFDictionary. M.fromList $ 
+                modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
                                                    [ (PDFName "Type",AnyPdfObject . PDFName $ "XObject")
                                                    , (PDFName "Subtype",AnyPdfObject . PDFName $ "Image")
                                                    , (PDFName "Width",AnyPdfObject . PDFInteger $ width)
@@ -403,7 +402,7 @@ createPDFRawImageFromARGB width height interpolate stream =  do
         addPixel [] = []
                         
         a' =  do 
-                modifyStrict $ \s -> s  {otherRsrcs = PDFDictionary. M.fromList $ 
+                modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
                                                    [ (PDFName "Type",AnyPdfObject . PDFName $ "XObject")
                                                    , (PDFName "Subtype",AnyPdfObject . PDFName $ "Image")
                                                    , (PDFName "Width",AnyPdfObject . PDFInteger $  width)

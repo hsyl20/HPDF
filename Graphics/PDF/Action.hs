@@ -19,7 +19,6 @@ module Graphics.PDF.Action(
  ) where
      
 import Graphics.PDF.LowLevel.Types
-import qualified Data.Map.Strict as M
 import Network.URI 
 
 
@@ -37,13 +36,13 @@ newtype GoToURL = GoToURL URI
 
 --data Rendition = Rendition
 --instance PdfObject Rendition where
---  toPDF a = toPDF . PDFDictionary . M.fromList $
+--  toPDF a = toPDF . dictFromList $
 --                    [ (PDFName "Type",AnyPdfObject . PDFName $ "Rendition")
 --                    , (PDFName "S",AnyPdfObject . PDFName $ "MR")
 --                    , (PDFName "C",AnyPdfObject movie)
 --                    ]
 --    where
---        movie = PDFDictionary . M.fromList $
+--        movie = dictFromList $
 --               [ (PDFName "Type",AnyPdfObject . PDFName $ "MediaClip")
 --               , (PDFName "S",AnyPdfObject . PDFName $ "MCD")
 --               , (PDFName "CT",AnyPdfObject . toPDFString $ "video/3gpp")
@@ -61,7 +60,7 @@ urlToPdfString uri =
 
 
 instance PdfObject GoToURL where
-    toPDF (GoToURL s) = toPDF . PDFDictionary . M.fromList $
+    toPDF (GoToURL s) = toPDF . dictFromList $
                          [ (PDFName "Type",AnyPdfObject . PDFName $ "Action")
                          , (PDFName "S",AnyPdfObject (PDFName "URI"))
                          , (PDFName "URI",AnyPdfObject (urlToPdfString s))
@@ -72,7 +71,7 @@ instance PdfLengthInfo GoToURL where
 
 
 --instance PdfObject ControlMedia where
---    toPDF (ControlMedia operation relatedScreenAnnotation rendition) = toPDF . PDFDictionary . M.fromList $
+--    toPDF (ControlMedia operation relatedScreenAnnotation rendition) = toPDF . dictFromList $
 --                         [ (PDFName "Type",AnyPdfObject . PDFName $ "Action")
 --                         , (PDFName "S",AnyPdfObject (PDFName "Rendition"))
 --                         , (PDFName "R",AnyPdfObject rendition)

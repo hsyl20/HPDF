@@ -51,7 +51,6 @@ import Graphics.PDF.Draw
 import Graphics.PDF.Pages
 import Control.Monad.State
 import qualified Data.IntMap as IM
-import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 
 -- | No information for the document  
@@ -65,7 +64,7 @@ createPDFXForm :: PDFFloat -- ^ Left
               -> PDFFloat -- ^ Top
               -> Draw a -- ^ Drawing commands
               -> PDF (PDFReference PDFXForm)
-createPDFXForm xa ya xb yb d = let a' = do modifyStrict $ \s -> s  {otherRsrcs = PDFDictionary. M.fromList $ 
+createPDFXForm xa ya xb yb d = let a' = do modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
                                                                        [ (PDFName "Type",AnyPdfObject . PDFName $ "XObject")
                                                                        , (PDFName "Subtype",AnyPdfObject . PDFName $ "Form")
                                                                        , (PDFName "FormType",AnyPdfObject . PDFInteger $ 1)

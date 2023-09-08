@@ -82,7 +82,6 @@ import Graphics.PDF.Pattern
 import Graphics.PDF.Navigation
 import Graphics.PDF.Text
 import qualified Data.IntMap as IM
-import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Lazy as B
 import Data.Int
 import Text.Printf(printf)
@@ -151,7 +150,7 @@ createStreams = do
          case p of
              -- Not linked to a page
              Nothing -> do                  
-                  return $ (otherRsrcs state') `pdfDictUnion` (PDFDictionary . M.fromList  $ [(PDFName "Resources",AnyPdfObject rsrcRef)])
+                  return $ (otherRsrcs state') `pdfDictUnion` (dictFromList  $ [(PDFName "Resources",AnyPdfObject rsrcRef)])
              -- Linked to a page
              Just pageRef -> do
                   setPageAnnotations (annots state') pageRef
@@ -200,10 +199,10 @@ data PDFTrailer
 #endif
     
 instance PdfObject PDFTrailer where
-   toPDF (PDFTrailer size root infos) = toPDF $ PDFDictionary. M.fromList $ 
+   toPDF (PDFTrailer size root infos) = toPDF $ dictFromList $
      [ (PDFName "Size",AnyPdfObject . PDFInteger $ size)
      , (PDFName "Root",AnyPdfObject root)
-     , (PDFName "Info",AnyPdfObject . PDFDictionary . M.fromList $ allInfos)
+     , (PDFName "Info",AnyPdfObject . dictFromList $ allInfos)
      ]
      where
       allInfos = [ (PDFName "Author",AnyPdfObject . toPDFString . author $ infos)

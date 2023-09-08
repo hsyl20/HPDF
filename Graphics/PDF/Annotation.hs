@@ -24,7 +24,6 @@ module Graphics.PDF.Annotation(
 
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Draw
-import qualified Data.Map.Strict as M
 import Graphics.PDF.Action
 import Graphics.PDF.Pages
 import Control.Monad.State(gets)
@@ -101,12 +100,12 @@ standardAnnotationDict a = [(PDFName "Type",AnyPdfObject . PDFName $ "Annot")
                          ]
 
 --instance PdfObject Screen where
---   toPDF a@(Screen _ _ _ p play stop) = toPDF . PDFDictionary . M.fromList $ 
+--   toPDF a@(Screen _ _ _ p play stop) = toPDF . dictFromList $
 --        standardAnnotationDict a ++ [(PDFName "P",AnyPdfObject p)]
 --                                    ++ (maybe [] (\x -> [(PDFName "A",AnyPdfObject x)]) play)
 --                                    ++ (maybe [] (\x -> [(PDFName "AA",AnyPdfObject $ otherActions x)]) stop)
 --         where
---             otherActions x = PDFDictionary . M.fromList $ [(PDFName "D",AnyPdfObject x)]
+--             otherActions x = dictFromList $ [(PDFName "D",AnyPdfObject x)]
 --
 --instance AnnotationObject Screen where
 --  addAnnotation (Screen video s rect p _ _) = do
@@ -120,7 +119,7 @@ standardAnnotationDict a = [(PDFName "Type",AnyPdfObject . PDFName $ "Annot")
 --  annotationRect (Screen _ _ r _ _ _) = r
                              
 instance PdfObject TextAnnotation where
-      toPDF a@(TextAnnotation _ _ i) = toPDF . PDFDictionary . M.fromList $ 
+      toPDF a@(TextAnnotation _ _ i) = toPDF . dictFromList $
            standardAnnotationDict a ++ [(PDFName "Name",AnyPdfObject . PDFName $ show i)]
 
 instance PdfLengthInfo TextAnnotation where
@@ -135,7 +134,7 @@ instance AnnotationObject TextAnnotation where
         return $ TextAnnotation a gr b
     
 instance PdfObject URLLink where
-    toPDF a@(URLLink _ _ url border) = toPDF . PDFDictionary . M.fromList $ 
+    toPDF a@(URLLink _ _ url border) = toPDF . dictFromList $
            standardAnnotationDict a ++ 
             [ (PDFName "A",AnyPdfObject (GoToURL url))
             , (PDFName "Border",AnyPdfObject . map AnyPdfObject $ (getBorder border))
@@ -153,7 +152,7 @@ instance AnnotationObject URLLink where
         return $ URLLink a gr b c
         
 instance PdfObject PDFLink where
-    toPDF a@(PDFLink _ _ page x y border) = toPDF . PDFDictionary . M.fromList $ 
+    toPDF a@(PDFLink _ _ page x y border) = toPDF . dictFromList $
                standardAnnotationDict a ++ 
                 [(PDFName "Dest",AnyPdfObject dest)
                 ,(PDFName "Border",AnyPdfObject . map AnyPdfObject $ (getBorder border))]

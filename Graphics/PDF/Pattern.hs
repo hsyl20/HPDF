@@ -26,7 +26,6 @@ module Graphics.PDF.Pattern(
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Draw
 import Graphics.PDF.Resources
-import qualified Data.Map.Strict as M
 import Graphics.PDF.Pages(recordBound,createContent)
 import Control.Monad.State
 import Control.Monad.Writer
@@ -78,7 +77,7 @@ createTilingPattern :: PDFFloat -- ^ Left
                     -> Draw a -- ^ Drawing commands
                     -> PDF Int
 createTilingPattern xa ya xb yb hstep vstep pt tt d = 
-    let a' = do modifyStrict $ \s -> s  {otherRsrcs = PDFDictionary. M.fromList $ 
+    let a' = do modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
                                              [ (PDFName "Type",AnyPdfObject . PDFName $ "Pattern")
                                              , (PDFName "PatternType",AnyPdfObject . PDFInteger $ 1)
                                              , (PDFName "PaintType",AnyPdfObject . PDFInteger $ (fromEnum pt) + 1)
