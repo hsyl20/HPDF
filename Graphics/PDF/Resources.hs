@@ -56,9 +56,6 @@ emptyRsrc :: PDFResource
 --emptyRsrc = PDFResource [AnyPdfObject . PDFName $ "PDF"] (M.empty)
 emptyRsrc = PDFResource [] (M.empty)        
 
-getResources :: M.Map PDFName PDFDictionary -> [(PDFName,AnyPdfObject)]
-getResources = M.toList . M.map AnyPdfObject
-
 instance PdfObject PDFResource where
  toPDF r = toPDF . resourceToDict $ r
      
@@ -74,12 +71,12 @@ addResource dict name newValue r = let addValue (Just (PDFDictionary a)) = Just 
                                        addValue (Nothing) = Just . PDFDictionary $ M.insert name newValue M.empty
  in
   r {resources = M.alter addValue dict (resources r)}
-    
+
 -- | Convert the resource to a PDf dictionary
 resourceToDict :: PDFResource -> PDFDictionary
-resourceToDict r = PDFDictionary . M.fromList  $
-    --[(PDFName "ProcSet",AnyPdfObject (procSet r))] ++
-    getResources (resources r)
+resourceToDict r = PDFDictionary $
+    -- M.insert (PDFName "ProcSet") (AnyPdfObject (procSet r)) $
+    M.map AnyPdfObject $ resources r
     
 emptyResource :: PDFResource -> Bool
 emptyResource (PDFResource a b) = null a && M.null b 
