@@ -83,6 +83,7 @@ module Graphics.PDF.Draw(
  , ColorFunction2(..)
  , Function1(..)
  , Function2(..)
+ , SoftMask(..)
  , getRgbColor
  , emptyDrawState
  , Matrix(..)
@@ -168,6 +169,7 @@ data DrawState = DrawState {
                 ,  patterns :: M.Map (PDFReference AnyPdfPattern) String
                 ,  colorSpaces :: M.Map PDFColorSpace String
                 ,  shadings :: M.Map PDFShading String
+                ,  softMasks :: M.Map SoftMask String
                 ,  matrix :: [Matrix]
                 }
 data DrawEnvironment = DrawEnvironment {
@@ -287,7 +289,7 @@ supplyName = do
 emptyDrawState :: Int -> DrawState
 emptyDrawState ref = 
     let names = (map (("O" ++ (show ref)) ++ ) $ [replicate k ['a'..'z'] | k <- [1..]] >>= sequence) in
-    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty [identity]
+    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity]
   
 -- | Execute the drawing commands to get a new state and an uncompressed PDF stream
 runDrawing :: Draw a -> DrawEnvironment -> DrawState -> (a,DrawState,BU.Builder)
@@ -997,6 +999,23 @@ instance PdfResourceObject PDFShading where
                                          , colorSpaceEntry cs
                                          , entry "Function" (toRsrc func)
                                          ]
+
+
+newtype SoftMask = SoftMask (PDFReference PDFXForm)
+    deriving (Eq, Ord)
+
+instance PdfResourceObject SoftMask where
+    toRsrc (SoftMask ref) =
+        AnyPdfObject $
+        dictFromList $
+            entry "Type" (PDFName "ExtGState") :
+            entry "SMask"
+                (dictFromList $
+                    entry "Type" (PDFName "Mask") :
+                    entry "S" (PDFName "Luminosity") :
+                    entry "G" ref :
+                    []) :
+            []
 
 
 -- | Apply a transformation matrix to the current coordinate frame

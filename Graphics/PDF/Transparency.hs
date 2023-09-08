@@ -18,8 +18,7 @@ module Graphics.PDF.Transparency(
 
 import qualified Graphics.PDF.Draw as Draw
 import Graphics.PDF.Document (createPDFXFormExtra)
-import Graphics.PDF.Draw (PDF, Draw)
-import Graphics.PDF.Resources (addResource)
+import Graphics.PDF.Draw (PDF, Draw, SoftMask(SoftMask))
 import Graphics.PDF.Shapes (Rectangle)
 import Graphics.PDF.LowLevel.Serializer (serialize)
 import Graphics.PDF.LowLevel.Types
@@ -28,14 +27,13 @@ import Control.Monad.Writer (tell)
 import Control.Monad (void)
 
 
-type SoftMask = PDFDictionary
 
 createSoftMask ::
        Rectangle -- ^ Bounding box
     -> Draw a -- ^ Content of the soft mask
     -> PDF SoftMask
-createSoftMask bbox mask = do
-    ref <-
+createSoftMask bbox mask =
+    fmap SoftMask $
         createPDFXFormExtra bbox mask $
             dictFromList $
                 entry "Group" (dictFromList $
@@ -46,30 +44,16 @@ createSoftMask bbox mask = do
                     []) :
                 []
 
-    return $
-        dictFromList $
-            entry "Type" (PDFName "ExtGState") :
-            entry "SMask"
-                (dictFromList $
-                    entry "Type" (PDFName "Mask") :
-                    entry "S" (PDFName "Luminosity") :
-                    entry "G" ref :
-                    []) :
-            []
-
 paintWithTransparency ::
        SoftMask -- ^ Soft mask
     -> Draw a -- ^ Shape to paint
     -> Draw ()
-paintWithTransparency extGState d =
+paintWithTransparency softMask d =
     Draw.withNewContext $ do
-        newName <- Draw.supplyName
-        modifyStrict $ \s -> s {
-            Draw.rsrc =
-                addResource
-                    (PDFName "ExtGState") (PDFName newName)
-                    (AnyPdfObject extGState) (Draw.rsrc s)
-            }
+        newName <-
+            Draw.registerResource "ExtGState"
+                Draw.softMasks (\newMap s -> s { Draw.softMasks = newMap })
+                softMask
         tell . mconcat $
             [ serialize "\n/"
             , serialize newName
