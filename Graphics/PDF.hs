@@ -54,6 +54,8 @@ module Graphics.PDF
   , module Graphics.PDF.Pattern
   -- ** Shading
   , module Graphics.PDF.Shading
+  -- ** Transparency
+  , module Graphics.PDF.Transparency
   , ColorSpace(..)
   , Formula(..)
   , calculator1
@@ -77,6 +79,7 @@ import Data.Monoid
 #endif
  
 import Graphics.PDF.Typesetting
+import Graphics.PDF.Transparency
 import Graphics.PDF.Shading
 import Graphics.PDF.Pattern
 import Graphics.PDF.Navigation
@@ -93,7 +96,7 @@ import Graphics.PDF.Colors
 import Graphics.PDF.Shapes
 import Graphics.PDF.Coordinates
 import Graphics.PDF.Pages
-import Graphics.PDF.Document
+import Graphics.PDF.Document hiding (createPDFXFormExtra)
 import Codec.Compression.Zlib
 import Graphics.PDF.Action
 import Graphics.PDF.Image

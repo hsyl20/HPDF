@@ -19,6 +19,7 @@ module Graphics.PDF.Document(
  , addPageWithTransition
  , drawWithPage
  , createPDFXForm
+ , createPDFXFormExtra
  -- ** Page transitions
  , PDFTransition(..)
  , PDFTransStyle(..)
@@ -49,9 +50,11 @@ import Data.Monoid
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Draw
 import Graphics.PDF.Pages
+import Graphics.PDF.Shapes (Rectangle(Rectangle))
 import Control.Monad.State
 import qualified Data.IntMap as IM
 import qualified Data.Text as T
+import Data.Complex (Complex((:+)))
 
 -- | No information for the document  
 standardDocInfo :: PDFDocumentInfo          
@@ -64,15 +67,27 @@ createPDFXForm :: PDFFloat -- ^ Left
               -> PDFFloat -- ^ Top
               -> Draw a -- ^ Drawing commands
               -> PDF (PDFReference PDFXForm)
-createPDFXForm xa ya xb yb d = let a' = do modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
-                                                                       [ entry "Type" (PDFName $ "XObject")
-                                                                       , entry "Subtype" (PDFName $ "Form")
-                                                                       , entry "FormType" (PDFInteger $ 1)
-                                                                       , entry "Matrix" (map PDFInteger $ [1,0,0,1,0,0])
-                                                                       , entry "BBox" (map AnyPdfObject $ [xa,ya,xb,yb])
-                                                                       ]
-                                                                  }
-                                           d
+createPDFXForm xa ya xb yb d =
+    createPDFXFormExtra (Rectangle (xa:+ya) (xb:+yb)) d emptyDictionary
+
+-- | Create a PDF XObject
+createPDFXFormExtra ::
+                 Rectangle -- ^ Bounding Box
+              -> Draw a -- ^ Drawing commands
+              -> PDFDictionary
+              -> PDF (PDFReference PDFXForm)
+createPDFXFormExtra (Rectangle (xa:+ya) (xb:+yb)) d dict =
+ let a' = do
+            modifyStrict $ \s -> s {
+                otherRsrcs = pdfDictUnion dict $ dictFromList $
+                    [ entry "Type" (PDFName $ "XObject")
+                    , entry "Subtype" (PDFName $ "Form")
+                    , entry "FormType" (PDFInteger $ 1)
+                    , entry "Matrix" (map PDFInteger $ [1,0,0,1,0,0])
+                    , entry "BBox" (map AnyPdfObject $ [xa,ya,xb,yb])
+                    ]
+              }
+            d
  in do
      PDFReference s <- createContent a' Nothing  
      recordBound s (xb-xa) (yb-ya)

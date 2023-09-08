@@ -78,6 +78,21 @@ functionalShadingTest =
                  1-y)))
         (addShape $ Rectangle (150:+50) (450 :+ 350))
 
+transparencyTest :: Rectangle -> SoftMask -> Draw ()
+transparencyTest rectB softMask = do
+    let rectA = Rectangle (100:+00) (400 :+ 300)
+    fillColor $ Rgb 1 0 0
+    fill rectA
+
+    paintWithTransparency softMask $ do
+        fillColor $ Rgb 1 1 0
+        fill rectB
+
+    setFillAlpha 0.5
+    let rectC = Rectangle (200:+100) (500 :+ 400)
+    fillColor $ Rgb 0 1 0
+    fill rectC
+
 
 patternTest :: PDFReference PDFPage -> PDF ()
 patternTest page = do
@@ -675,6 +690,18 @@ testAll timesRoman timesBold helveticaBold symbol zapf jpg = do
      newSection "FunctionalShading" Nothing Nothing $ do
         drawWithPage page8a $ do
           functionalShadingTest
+
+     page8b <- addPage Nothing
+     newSection "Transparency" Nothing Nothing $ do
+        let rectB = Rectangle (150:+50) (450 :+ 350)
+        softMask <-
+            createSoftMask rectB
+                (paintWithShading
+                    (AxialShading 300 300 600 400
+                        (ColorFunction1 GraySpace $ Interpolated1 1  0.8 0.02))
+                    (addShape rectB))
+        drawWithPage page8b $
+          transparencyTest rectB softMask
 
     page9 <- addPage Nothing
     newSection "Media" Nothing Nothing $ do
