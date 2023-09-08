@@ -989,16 +989,18 @@ instance PdfResourceObject PDFShading where
           AnyPdfObject . dictFromList $
                                  [ entry "ShadingType" (PDFInteger $ 2)
                                  , entry "Coords" [x0,y0,x1,y1]
+                                 , entry "Extend" [True, True]
                                  , colorSpaceEntry cs
                                  , entry "Function" (toRsrc func)
                                  ]
       toRsrc (RadialShading x0 y0 r0 x1 y1 r1 (ColorFunction1 cs func)) =
           AnyPdfObject . dictFromList $
-                                         [ entry "ShadingType" (PDFInteger $ 3)
-                                         , entry "Coords" [x0,y0,r0,x1,y1,r1]
-                                         , colorSpaceEntry cs
-                                         , entry "Function" (toRsrc func)
-                                         ]
+                                 [ entry "ShadingType" (PDFInteger $ 3)
+                                 , entry "Coords" [x0,y0,r0,x1,y1,r1]
+                                 , entry "Extend" [True, True]
+                                 , colorSpaceEntry cs
+                                 , entry "Function" (toRsrc func)
+                                 ]
 
 
 newtype SoftMask = SoftMask (PDFReference PDFXForm)
