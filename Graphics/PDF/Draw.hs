@@ -241,8 +241,13 @@ modifyDrawST :: (forall s. DrawTuple s -> STRef s a) -> (a -> a) -> Draw ()
 modifyDrawST f g = Draw $ \env -> modifySTRef (f env) g
 
 -- | A PDF stream object
-data PDFStream = PDFStream !BU.Builder !Bool !(PDFReference MaybeLength) !PDFDictionary
-                                   
+data PDFStream =
+    PDFStream
+        !BU.Builder
+        !Bool
+        !(Either (PDFReference MaybeLength) PDFLength)
+        !PDFDictionary
+
 instance PdfObject PDFStream where
   toPDF (PDFStream s c l d) = 
       mconcat   $ [ toPDF dict
@@ -253,13 +258,16 @@ instance PdfObject PDFStream where
                   , serialize "endstream"]
    where
       compressedStream False = []
-      compressedStream True = if not (pdfDictMember (PDFName "Filter") d) then [entry "Filter" [AnyPdfObject . PDFName $ "FlateDecode"]] else []
-      lenDict = dictFromList $ [entry "Length" l] ++ compressedStream c
+      compressedStream True = if not (pdfDictMember (PDFName "Filter") d) then [entry "Filter" [PDFName $ "FlateDecode"]] else []
+      lenDict = dictFromList $ [either (entry "Length") (entry "Length") l] ++ compressedStream c
       dict = pdfDictUnion lenDict d
 
 instance PdfLengthInfo PDFStream where 
-  pdfLengthInfo (PDFStream s _ l _) =
-      Just (PDFLength . B.length . BU.toLazyByteString $ s,l)
+  pdfLengthInfo (PDFStream s _ el _) =
+      either
+        (\ref -> Just (PDFLength . B.length . BU.toLazyByteString $ s, ref))
+        (const Nothing)
+        el
 
 -- | An empty drawing
 emptyDrawing :: Draw ()
@@ -781,20 +789,24 @@ instance (a ~ PDFFloat, b ~ PDFFloat, c ~ PDFFloat) => ColorTuple (a,b,c) where
 byteFromFloat :: PDFFloat -> Int
 byteFromFloat x = round $ min 255 $ max 0 $ x*255
 
+pdfStreamFromLazyByteString :: C.ByteString -> PDFDictionary -> PDFStream
+pdfStreamFromLazyByteString stream dict =
+    PDFStream
+        (BU.fromLazyByteString stream)
+        False
+        (Right . PDFLength . B.length $ stream)
+        dict
+
 rsrcFromSampled ::
     (ColorTuple a) =>
     PDFDictionary ->
     ((i, i) -> [Int]) -> Array i a -> AnyPdfObject
 rsrcFromSampled domain computeSizes arr =
-    let stream =
-            (C.pack $ concatMap rgbHex $ Array.elems arr)
-            <>
-            C.pack " >" in
     AnyPdfObject $
-    PDFStream
-        (BU.fromLazyByteString stream)
-        False
-        (PDFReference . fromIntegral . B.length $ stream)
+    pdfStreamFromLazyByteString
+        ((C.pack $ concatMap rgbHex $ Array.elems arr)
+            <>
+            C.pack " >")
         (pdfDictUnion domain . dictFromList $
            [entry "FunctionType" (PDFInteger 0),
             entry "Size" (computeSizes $ Array.bounds arr),
@@ -817,12 +829,9 @@ rsrcFromInterpolated domain n a b =
 rsrcFromFormula ::
     (Expr.Function f) => PDFDictionary -> f -> AnyPdfObject
 rsrcFromFormula domain f =
-    let stream = C.cons '{' $ C.snoc (Expr.serialize f) '}' in
     AnyPdfObject $
-    PDFStream
-        (BU.fromLazyByteString stream)
-        False
-        (PDFReference . fromIntegral . B.length $ stream)
+    pdfStreamFromLazyByteString
+        (C.cons '{' $ C.snoc (Expr.serialize f) '}')
         (pdfDictUnion domain . dictFromList $
             [entry "FunctionType" (PDFInteger 4)])
 

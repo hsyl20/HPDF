@@ -165,12 +165,12 @@ createStreams = do
        then do
          let w''' = compress . toLazyByteString $ w'
              w'' = fromLazyByteString w'''
-         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w'' True ref resources)
-         updateObject ref (UnknownLength)
+         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w'' True (Left ref) resources)
+         updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length w'''))
        else do
-         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w' False ref resources)
-         updateObject ref (UnknownLength)
+         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w' False (Left ref) resources)
+         updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length . toLazyByteString $ w'))
 
 -- | Save all the pages and streams in the main object dictionary
