@@ -276,7 +276,7 @@ createObjectByteStrings pdfState m =
             let Just o = IM.lookup k im
                 mim = do
                     (l, PDFReference ref) <- pdfLengthInfo o
-                    return $ IM.insert ref (AnyPdfObject (KnownLength (PDFLength l))) im
+                    return $ IM.insert ref (AnyPdfObject (KnownLength l)) im
             in (fromMaybe im mim, objectEncoding (k,o))
 
           encodedObjects = snd $ mapAccumL encodeAnObject objs (IM.keys objs)

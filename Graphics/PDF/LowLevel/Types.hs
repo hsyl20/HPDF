@@ -21,7 +21,7 @@ module Graphics.PDF.LowLevel.Types where
 
 import qualified Data.Map.Strict as M
 import Data.List(intersperse)
-import Data.Int
+import Data.Int(Int64)
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.Binary.Builder(Builder,fromByteString)
@@ -57,7 +57,7 @@ class PdfObject a where
   toPDF :: a -> Builder
 
 class PdfLengthInfo a where 
-  pdfLengthInfo :: a -> Maybe (Int64 , PDFReference MaybeLength)
+  pdfLengthInfo :: a -> Maybe (PDFLength , PDFReference MaybeLength)
   pdfLengthInfo _ = Nothing
 
 -- | Anonymous PDF object

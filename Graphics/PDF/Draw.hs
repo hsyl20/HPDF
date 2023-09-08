@@ -258,8 +258,9 @@ instance PdfObject PDFStream where
       dict = pdfDictUnion lenDict d
 
 instance PdfLengthInfo PDFStream where 
-  pdfLengthInfo (PDFStream s _ l _) = Just (B.length . BU.toLazyByteString $ s,l)
-    
+  pdfLengthInfo (PDFStream s _ l _) =
+      Just (PDFLength . B.length . BU.toLazyByteString $ s,l)
+
 -- | An empty drawing
 emptyDrawing :: Draw ()
 emptyDrawing = return ()
