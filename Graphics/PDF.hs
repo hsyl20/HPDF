@@ -100,7 +100,8 @@ import Graphics.PDF.Image
 import Graphics.PDF.Resources(emptyResource)
 import Data.Binary.Builder(Builder,fromLazyByteString, toLazyByteString)
 import Graphics.PDF.LowLevel.Serializer
-import Data.List(unfoldr)
+import Data.List(mapAccumL)
+import Data.Maybe(fromMaybe)
 import qualified Data.Text as T
 import Graphics.PDF.Fonts.Font 
 import Graphics.PDF.Fonts.StandardFont
@@ -271,19 +272,14 @@ createObjectByteStrings pdfState m =
           objectEncoding (x,a) = toPDF . PDFReferencedObject (fromIntegral $! x) $ a
           (root,s) = flip runState pdfState  . unPDF $ createPDF >> m >> saveObjects
           objs = objects s
-          encodeAnObject (_,[]) = Nothing 
-          encodeAnObject (im,k:t) = 
+          encodeAnObject im k =
             let Just o = IM.lookup k im
-                result = do 
-                    (l,PDFReference ref) <- pdfLengthInfo o 
-                    let im' = IM.insert ref (AnyPdfObject (KnownLength (PDFLength l))) im
-                    return im'
-            in
-            case result of 
-              Nothing -> Just (objectEncoding (k,o),(im,t)) 
-              Just im' ->  Just (objectEncoding (k,o),(im',t)) 
+                mim = do
+                    (l, PDFReference ref) <- pdfLengthInfo o
+                    return $ IM.insert ref (AnyPdfObject (KnownLength (PDFLength l))) im
+            in (fromMaybe im mim, objectEncoding (k,o))
 
-          encodedObjects = unfoldr encodeAnObject (objs,IM.keys objs)
+          encodedObjects = snd $ mapAccumL encodeAnObject objs (IM.keys objs)
           objectContents = header : encodedObjects
           (_nb, _len, _toc) = writeObjectsAndCreateToc objectContents
       in
