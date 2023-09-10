@@ -770,7 +770,8 @@ getRgbColor :: Color -> (PDFFloat,PDFFloat,PDFFloat)
 getRgbColor (Rgb r g b) = (r, g, b)  
 getRgbColor (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v) in (r, g, b)  
 
-type FloatRGB = (PDFFloat, PDFFloat, PDFFloat)
+type FloatRGB  = (PDFFloat, PDFFloat, PDFFloat)
+type FloatCMYK = (PDFFloat, PDFFloat, PDFFloat, PDFFloat)
 
 class ColorTuple a where
     rgbHex :: a -> String
@@ -788,6 +789,16 @@ instance (a ~ PDFFloat, b ~ PDFFloat, c ~ PDFFloat) => ColorTuple (a,b,c) where
             (byteFromFloat r) (byteFromFloat g) (byteFromFloat b)
     colorComponents (r,g,b) = [r,g,b]
     colorDimensions _ = 3
+
+instance
+    (a ~ PDFFloat, b ~ PDFFloat, c ~ PDFFloat, d ~ PDFFloat) =>
+        ColorTuple (a,b,c,d) where
+    rgbHex (c,m,y,k) =
+        printf "%02X%02X%02X%02X"
+            (byteFromFloat c) (byteFromFloat m)
+            (byteFromFloat y) (byteFromFloat k)
+    colorComponents (c,m,y,k) = [c,m,y,k]
+    colorDimensions _ = 4
 
 byteFromFloat :: PDFFloat -> Int
 byteFromFloat x = round $ min 255 $ max 0 $ x*255
@@ -841,6 +852,7 @@ rsrcFromFormula domain f =
 
 type ExprFloat = PDFExpression PDFFloat
 type ExprRGB = (ExprFloat, ExprFloat, ExprFloat)
+type ExprCMYK = (ExprFloat, ExprFloat, ExprFloat, ExprFloat)
 
 
 newtype Formula a = Formula a
@@ -854,6 +866,7 @@ instance (Expr.Function a) => Ord (Formula a) where
 data ColorSpace a e where
     GraySpace :: ColorSpace PDFFloat ExprFloat
     RGBSpace :: ColorSpace FloatRGB ExprRGB
+    CMYKSpace :: ColorSpace FloatCMYK ExprCMYK
 
 deriving instance Eq (ColorSpace a e)
 deriving instance Ord (ColorSpace a e)
@@ -863,6 +876,7 @@ colorSpaceName space =
     case space of
         GraySpace -> PDFName "DeviceGray"
         RGBSpace -> PDFName "DeviceRGB"
+        CMYKSpace -> PDFName "DeviceCMYK"
 
 colorSpaceEntry :: ColorSpace a e -> (PDFName, AnyPdfObject)
 colorSpaceEntry space = entry "ColorSpace" $ colorSpaceName space
@@ -882,6 +896,7 @@ instance Eq ColorFunction1 where
         case (spaceA, spaceB) of
             (GraySpace, GraySpace) -> funcA == funcB
             (RGBSpace, RGBSpace) -> funcA == funcB
+            (CMYKSpace, CMYKSpace) -> funcA == funcB
             _ -> False
 
 instance Ord ColorFunction1 where
@@ -889,8 +904,9 @@ instance Ord ColorFunction1 where
         case (spaceA, spaceB) of
             (GraySpace, GraySpace) -> compare funcA funcB
             (RGBSpace, RGBSpace) -> compare funcA funcB
-            (GraySpace, RGBSpace) -> LT
-            (RGBSpace, GraySpace) -> GT
+            (CMYKSpace, CMYKSpace) -> compare funcA funcB
+            (GraySpace, _) -> LT; (_, GraySpace) -> GT
+            (RGBSpace,  _) -> LT; (_, RGBSpace)  -> GT
 
 
 data ColorFunction2 =
@@ -903,6 +919,7 @@ instance Eq ColorFunction2 where
         case (spaceA, spaceB) of
             (GraySpace, GraySpace) -> funcA == funcB
             (RGBSpace, RGBSpace) -> funcA == funcB
+            (CMYKSpace, CMYKSpace) -> funcA == funcB
             _ -> False
 
 instance Ord ColorFunction2 where
@@ -910,8 +927,9 @@ instance Ord ColorFunction2 where
         case (spaceA, spaceB) of
             (GraySpace, GraySpace) -> compare funcA funcB
             (RGBSpace, RGBSpace) -> compare funcA funcB
-            (GraySpace, RGBSpace) -> LT
-            (RGBSpace, GraySpace) -> GT
+            (CMYKSpace, CMYKSpace) -> compare funcA funcB
+            (GraySpace, _) -> LT; (_, GraySpace) -> GT
+            (RGBSpace,  _) -> LT; (_, RGBSpace)  -> GT
 
 
 -- ToDo: with custom Eq and Ord instances we can save the Formula wrapper
