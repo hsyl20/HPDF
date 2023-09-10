@@ -13,6 +13,7 @@ module Graphics.PDF.Transparency(
   -- * Transparency
   SoftMask,
   createSoftMask,
+  createTransparencyGroup,
   paintWithTransparency,
   ) where
 
@@ -32,18 +33,35 @@ createSoftMask ::
        Rectangle -- ^ Bounding box
     -> Draw a -- ^ Content of the soft mask
     -> PDF SoftMask
-createSoftMask bbox mask =
-    fmap SoftMask $
-        createPDFXFormExtra bbox mask $
-            dictFromList $
-                entry "Group" (dictFromList $
-                    entry "Type" (PDFName "Group") :
-                    entry "S" (PDFName "Transparency") :
-                    entry "I" True :
-                    entry "CS" (PDFName "DeviceGray") :
-                    []) :
-                []
+createSoftMask bbox =
+    fmap SoftMask .
+    createTransparencyGroup Draw.GraySpace bbox
 
+createTransparencyGroup ::
+       Draw.ColorSpace a e
+    -> Rectangle -- ^ Bounding box
+    -> Draw b -- ^ Painting
+    -> PDF (PDFReference Draw.PDFXForm)
+createTransparencyGroup space bbox img =
+    createPDFXFormExtra bbox img $
+        dictFromList $
+            entry "Group" (dictFromList $
+                entry "Type" (PDFName "Group") :
+                entry "S" (PDFName "Transparency") :
+                entry "I" True :
+                entry "CS" (Draw.colorSpaceName space) :
+                []) :
+            []
+
+{- |
+If the Draw Monad paints overlapping geometric primitives or text,
+the result will certainly not be what you want.
+Text ignores soft masks.
+Each primitive other than text is painted with the soft mask
+over the previous geometric objects.
+It is very likely, that in this case you want
+to generate a transparency group for your drawing.
+-}
 paintWithTransparency ::
        SoftMask -- ^ Soft mask
     -> Draw a -- ^ Shape to paint

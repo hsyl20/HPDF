@@ -76,6 +76,7 @@ module Graphics.PDF.Draw(
  , AnnotationStyle(..)
  , PDFShading(..)
  , ColorSpace(..)
+ , colorSpaceName
  , Formula(..)
  , calculator1
  , calculator2
@@ -857,11 +858,14 @@ data ColorSpace a e where
 deriving instance Eq (ColorSpace a e)
 deriving instance Ord (ColorSpace a e)
 
-colorSpaceEntry :: ColorSpace a e -> (PDFName, AnyPdfObject)
-colorSpaceEntry space =
+colorSpaceName :: ColorSpace a e -> PDFName
+colorSpaceName space =
     case space of
-        GraySpace -> entry "ColorSpace" $ PDFName "DeviceGray"
-        RGBSpace -> entry "ColorSpace" $ PDFName "DeviceRGB"
+        GraySpace -> PDFName "DeviceGray"
+        RGBSpace -> PDFName "DeviceRGB"
+
+colorSpaceEntry :: ColorSpace a e -> (PDFName, AnyPdfObject)
+colorSpaceEntry space = entry "ColorSpace" $ colorSpaceName space
 
 rangeEntry :: (ColorTuple a) => f a e -> (PDFName, AnyPdfObject)
 rangeEntry func =
