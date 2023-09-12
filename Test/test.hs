@@ -93,6 +93,40 @@ transparencyTest rectB softMask = do
     fillColor $ Rgb 0 1 0
     fill rectC
 
+trafficSign :: AnyFont -> Draw ()
+trafficSign helvetica = do
+    let font = PDFFont helvetica 180
+    let str = "P"
+    strokeColor black
+    drawText $ text font (-0.5 * textWidth font str) (-70) str
+    setWidth 30
+    strokeColor red
+    stroke $ Circle 0 0 100
+    let r = 100 * sqrt 0.5
+    stroke $ Line (-r) (-r) r r
+
+transparencyGroupTest ::
+    AnyFont -> Rectangle -> SoftMask -> PDFReference PDFXForm -> Draw ()
+transparencyGroupTest helvectica rectB softMask trafficSignObj = do
+    applyMatrix $ scale 0.5 0.5
+    applyMatrix $ translate $ 150:+150
+    withNewContext $ trafficSign helvectica
+    withNewContext $ do
+        applyMatrix $ translate $ 300:+0
+        -- alpha channel reveals internal structure of sign - not intended
+        setStrokeAlpha 0.5
+        setFillAlpha 0.5
+        trafficSign helvectica
+    withNewContext $ do
+        applyMatrix $ translate $ 600:+0
+        -- soft mask has no effect on text ... and additional graphics?
+        paintWithTransparency softMask $
+            trafficSign helvectica
+    withNewContext $ do
+        applyMatrix $ translate $ 900:+0
+        paintWithTransparency softMask $
+            drawXObject trafficSignObj
+
 
 patternTest :: PDFReference PDFPage -> PDF ()
 patternTest page = do
@@ -693,15 +727,28 @@ testAll timesRoman timesBold helveticaBold symbol zapf jpg = do
 
      page8b <- addPage Nothing
      newSection "Transparency" Nothing Nothing $ do
-        let rectB = Rectangle (150:+50) (450 :+ 350)
-        softMask <-
-            createSoftMask rectB
-                (paintWithShading
-                    (AxialShading 300 300 600 400
-                        (ColorFunction1 GraySpace $ Interpolated1 1  0.8 0.02))
-                    (addShape rectB))
-        drawWithPage page8b $
-          transparencyTest rectB softMask
+        do  let rectB = Rectangle (150:+50) (450 :+ 350)
+            softMask <-
+                createSoftMask rectB
+                    (paintWithShading
+                        (AxialShading 300 300 600 400
+                            (ColorFunction1 GraySpace $
+                             Interpolated1 1  0.8 0.02))
+                        (addShape rectB))
+            drawWithPage page8b $
+                transparencyTest rectB softMask
+
+        page8c <- addPage Nothing
+        do  let bbox = Rectangle (-(150:+150)) (150:+150)
+            softMask <-
+                createSoftMask bbox $ do
+                    fillColor $ Rgb 0.5 0.5 0.5
+                    fill bbox
+            transpGroup <-
+                createTransparencyGroup RGBSpace bbox $
+                trafficSign helveticaBold
+            drawWithPage page8c $
+                transparencyGroupTest helveticaBold bbox softMask transpGroup
 
     page9 <- addPage Nothing
     newSection "Media" Nothing Nothing $ do
