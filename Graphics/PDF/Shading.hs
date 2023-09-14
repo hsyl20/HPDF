@@ -57,7 +57,7 @@ createFunction1Object func =
 
 createFunction2Object ::
     (ColorTuple a, Expr.Result e) =>
-    Function2 a e ->
+    Function2 Global a e ->
     PDF (FunctionObject
             (PDFFloat -> PDFFloat -> a) (ExprFloat -> ExprFloat -> e))
 createFunction2Object func =

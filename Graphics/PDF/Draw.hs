@@ -83,7 +83,6 @@ module Graphics.PDF.Draw(
  , ColorFunction2(..)
  , Function1(..)
  , Function2(..)
- , InlinedFunction2(..)
  , Global
  , Local
  , linearStitched
@@ -929,7 +928,7 @@ instance Ord ColorFunction1 where
 data ColorFunction2 =
     forall a e.
     (ColorTuple a, Expr.Result e) =>
-    ColorFunction2 (ColorSpace a e) (InlinedFunction2 a e)
+    ColorFunction2 (ColorSpace a e) (Function2 Local a e)
 
 instance Eq ColorFunction2 where
     ColorFunction2 spaceA funcA == ColorFunction2 spaceB funcB  =
@@ -1027,17 +1026,29 @@ instance
                 AnyPdfObject $ rsrcFromStitched domain part parts
 
 
-data InlinedFunction2 a e =
-      GlobalFunction2
-        (FunctionObject
-            (PDFFloat -> PDFFloat -> a) (ExprFloat -> ExprFloat -> e))
-    deriving (Eq, Ord)
+data Function2 scope a e where
+    GlobalFunction2 ::
+        FunctionObject
+            (PDFFloat -> PDFFloat -> a) (ExprFloat -> ExprFloat -> e) ->
+        Function2 Local a e
+    Sampled2 :: (Array (Int,Int) a) -> Function2 Global a e
+    Calculator2 :: (ExprFloat -> ExprFloat -> e) -> Function2 Global a e
 
-data Function2 a e =
-      Sampled2 (Array (Int,Int) a)
-    | Calculator2 (ExprFloat -> ExprFloat -> e)
+instance
+    (Local ~ scope, ColorTuple a, Eq a, Expr.Result e) =>
+        Eq (Function2 scope a e) where
+    a==b =
+        case (a,b) of
+            (GlobalFunction2 fa, GlobalFunction2 fb) -> fa == fb
 
-calculator2 :: (ExprFloat -> ExprFloat -> e) -> Function2 a e
+instance
+    (Local ~ scope, ColorTuple a, Ord a, Expr.Result e) =>
+        Ord (Function2 scope a e) where
+    compare a b =
+        case (a,b) of
+            (GlobalFunction2 fa, GlobalFunction2 fb) -> compare fa fb
+
+calculator2 :: (ExprFloat -> ExprFloat -> e) -> Function2 Global a e
 calculator2 = Calculator2
 
 domain2Dict :: (ColorTuple a) => f a e -> PDFDictionary
@@ -1048,8 +1059,8 @@ domain2Dict func =
     ]
 
 instance
-    (ColorTuple a, Expr.Result e) =>
-        PdfResourceObject (InlinedFunction2 a e) where
+    (Local ~ scope, ColorTuple a, Expr.Result e) =>
+        PdfResourceObject (Function2 scope a e) where
     toRsrc func =
         case func of
             GlobalFunction2 (FunctionObject obj) -> AnyPdfObject obj

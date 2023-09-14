@@ -63,7 +63,6 @@ module Graphics.PDF
   , ColorFunction2(..)
   , Function1(..)
   , Function2(..)
-  , InlinedFunction2(..)
   , Global
   , Local
   , linearStitched
