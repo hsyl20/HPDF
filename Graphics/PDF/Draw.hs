@@ -77,13 +77,21 @@ module Graphics.PDF.Draw(
  , PDFShading(..)
  , ColorSpace(..)
  , colorSpaceName
- , Formula(..)
  , calculator1
  , calculator2
  , ColorFunction1(..)
  , ColorFunction2(..)
  , Function1(..)
  , Function2(..)
+ , InlinedFunction1(..)
+ , InlinedFunction2(..)
+ , FunctionObject(FunctionObject, FunctionStream)
+ , rsrcFromCalculator
+ , rsrcFromInterpolated
+ , rsrcFromSampled
+ , ColorTuple
+ , domain1Dict
+ , domain2Dict
  , SoftMask(..)
  , getRgbColor
  , emptyDrawState
@@ -109,8 +117,6 @@ import Data.Array (Array)
 
 import Control.Monad.ST
 import Data.STRef
-
-import Data.Ord (comparing)
 
 import Control.Monad.Writer.Class
 import Control.Monad.Reader.Class
@@ -811,12 +817,16 @@ pdfStreamFromLazyByteString stream dict =
         (Right . PDFLength . B.length $ stream)
         dict
 
+data FunctionObject a e =
+      FunctionObject (PDFReference PDFDictionary)
+    | FunctionStream (PDFReference PDFStream)
+    deriving (Eq, Ord)
+
 rsrcFromSampled ::
     (ColorTuple a) =>
     PDFDictionary ->
-    ((i, i) -> [Int]) -> Array i a -> AnyPdfObject
+    ((i, i) -> [Int]) -> Array i a -> PDFStream
 rsrcFromSampled domain computeSizes arr =
-    AnyPdfObject $
     pdfStreamFromLazyByteString
         ((C.pack $ concatMap rgbHex $ Array.elems arr)
             <>
@@ -831,19 +841,18 @@ rsrcFromSampled domain computeSizes arr =
 -- | Interpolation function
 rsrcFromInterpolated ::
     (ColorTuple a) =>
-    PDFDictionary -> PDFFloat -> a -> a -> AnyPdfObject
+    PDFDictionary -> PDFFloat -> a -> a -> PDFDictionary
 rsrcFromInterpolated domain n a b =
-    AnyPdfObject . pdfDictUnion domain . dictFromList $
+    pdfDictUnion domain . dictFromList $
                             [ entry "FunctionType" (PDFInteger $ 2)
                             , entry "C0" (colorComponents a)
                             , entry "C1" (colorComponents b)
                             , entry "N" n
                             ]
 
-rsrcFromFormula ::
-    (Expr.Function f) => PDFDictionary -> f -> AnyPdfObject
-rsrcFromFormula domain f =
-    AnyPdfObject $
+rsrcFromCalculator ::
+    (Expr.Function f) => PDFDictionary -> f -> PDFStream
+rsrcFromCalculator domain f =
     pdfStreamFromLazyByteString
         (C.cons '{' $ C.snoc (Expr.serialize f) '}')
         (pdfDictUnion domain . dictFromList $
@@ -854,14 +863,6 @@ type ExprFloat = PDFExpression PDFFloat
 type ExprRGB = (ExprFloat, ExprFloat, ExprFloat)
 type ExprCMYK = (ExprFloat, ExprFloat, ExprFloat, ExprFloat)
 
-
-newtype Formula a = Formula a
-
-instance (Expr.Function a) => Eq (Formula a) where
-    Formula a == Formula b  =  Expr.serialize a == Expr.serialize b
-
-instance (Expr.Function a) => Ord (Formula a) where
-    compare (Formula a) (Formula b)  =  comparing Expr.serialize a b
 
 data ColorSpace a e where
     GraySpace :: ColorSpace PDFFloat ExprFloat
@@ -889,7 +890,7 @@ rangeEntry func =
 data ColorFunction1 =
     forall a e.
     (ColorTuple a, Expr.Result e) =>
-    ColorFunction1 (ColorSpace a e) (Function1 a e)
+    ColorFunction1 (ColorSpace a e) (InlinedFunction1 a e)
 
 instance Eq ColorFunction1 where
     ColorFunction1 spaceA funcA == ColorFunction1 spaceB funcB  =
@@ -912,7 +913,7 @@ instance Ord ColorFunction1 where
 data ColorFunction2 =
     forall a e.
     (ColorTuple a, Expr.Result e) =>
-    ColorFunction2 (ColorSpace a e) (Function2 a e)
+    ColorFunction2 (ColorSpace a e) (InlinedFunction2 a e)
 
 instance Eq ColorFunction2 where
     ColorFunction2 spaceA funcA == ColorFunction2 spaceB funcB  =
@@ -932,61 +933,64 @@ instance Ord ColorFunction2 where
             (RGBSpace,  _) -> LT; (_, RGBSpace)  -> GT
 
 
--- ToDo: with custom Eq and Ord instances we can save the Formula wrapper
+data InlinedFunction1 a e =
+      GlobalFunction1 (FunctionObject (PDFFloat -> a) (ExprFloat -> e))
+    | InlinedInterpolated1 PDFFloat a a
+    deriving (Eq, Ord)
+
 data Function1 a e =
       Sampled1 (Array Int a)
     | Interpolated1 PDFFloat a a
-    | Calculator1 (Formula (ExprFloat -> e))
-    deriving (Eq, Ord)
+    | Calculator1 (ExprFloat -> e)
 
 calculator1 :: (ExprFloat -> e) -> Function1 a e
-calculator1 = Calculator1 . Formula
+calculator1 = Calculator1
+
+domain1Dict :: (ColorTuple a) => f a e -> PDFDictionary
+domain1Dict func =
+    dictFromList [
+        entry "Domain" [0,1::Int],
+        rangeEntry func
+    ]
 
 instance
     (ColorTuple a, Expr.Result e) =>
-        PdfResourceObject (Function1 a e) where
+        PdfResourceObject (InlinedFunction1 a e) where
     toRsrc func =
-        let domain =
-                dictFromList [
-                    entry "Domain" [0,1::Int],
-                    rangeEntry func
-                ] in
-
         case func of
-            Sampled1 arr ->
-                rsrcFromSampled domain (\bnds -> [Array.rangeSize bnds]) arr
+            GlobalFunction1 (FunctionObject obj) -> AnyPdfObject obj
+            GlobalFunction1 (FunctionStream obj) -> AnyPdfObject obj
+            InlinedInterpolated1 n x y ->
+                AnyPdfObject $ rsrcFromInterpolated (domain1Dict func) n x y
 
-            Interpolated1 n x y -> rsrcFromInterpolated domain n x y
 
-            Calculator1 (Formula f) -> rsrcFromFormula domain f
-
+data InlinedFunction2 a e =
+      GlobalFunction2
+        (FunctionObject
+            (PDFFloat -> PDFFloat -> a) (ExprFloat -> ExprFloat -> e))
+    deriving (Eq, Ord)
 
 data Function2 a e =
       Sampled2 (Array (Int,Int) a)
-    | Calculator2 (Formula (ExprFloat -> ExprFloat -> e))
-    deriving (Eq, Ord)
+    | Calculator2 (ExprFloat -> ExprFloat -> e)
 
 calculator2 :: (ExprFloat -> ExprFloat -> e) -> Function2 a e
-calculator2 = Calculator2 . Formula
+calculator2 = Calculator2
+
+domain2Dict :: (ColorTuple a) => f a e -> PDFDictionary
+domain2Dict func =
+    dictFromList [
+        entry "Domain" [0,1, 0,1::Int],
+        rangeEntry func
+    ]
 
 instance
     (ColorTuple a, Expr.Result e) =>
-        PdfResourceObject (Function2 a e) where
+        PdfResourceObject (InlinedFunction2 a e) where
     toRsrc func =
-        let domain =
-                dictFromList [
-                    entry "Domain" [0,1, 0,1::Int],
-                    rangeEntry func
-                ] in
-
         case func of
-            Sampled2 arr ->
-                rsrcFromSampled
-                    domain
-                    (\((lx,ly), (ux,uy)) -> [Array.rangeSize (lx,ux), Array.rangeSize (ly,uy)])
-                    arr
-
-            Calculator2 (Formula f) -> rsrcFromFormula domain f
+            GlobalFunction2 (FunctionObject obj) -> AnyPdfObject obj
+            GlobalFunction2 (FunctionStream obj) -> AnyPdfObject obj
 
 
 -- | A shading

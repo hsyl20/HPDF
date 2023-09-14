@@ -62,21 +62,34 @@ lineStyle  = do
             geometryTest
             
             
-shadingTest :: Draw ()
-shadingTest  = do
-     paintWithShading (RadialShading 0 0 50 0 0 350 (ColorFunction1 RGBSpace $ Sampled1 $ listArray (0,3) [(1,0,0), (1,0,1), (0,0,1), (0,1,1)])) (addShape $ Rectangle 0 (300 :+ 300))
-     paintWithShading (AxialShading 300 300 600 400 (ColorFunction1 GraySpace $ Interpolated1 1  0.8 0.02)) (addShape $ Ellipse 300 300 600 400)
+shadingTest :: PDFReference PDFPage -> PDF ()
+shadingTest page = do
+    funcObj <-
+        createFunction1Object $
+        Sampled1 $ listArray (0,3) [(1,0,0), (1,0,1), (0,0,1), (0,1,1)]
+    drawWithPage page $ do
+        paintWithShading
+            (RadialShading 0 0 50 0 0 350
+                (ColorFunction1 RGBSpace $ GlobalFunction1 funcObj))
+            (addShape $ Rectangle 0 (300 :+ 300))
+        paintWithShading
+            (AxialShading 300 300 600 400
+                (ColorFunction1 GraySpace $ InlinedInterpolated1 1  0.8 0.02))
+            (addShape $ Ellipse 300 300 600 400)
 
-functionalShadingTest :: Draw ()
-functionalShadingTest =
-     paintWithShading
-        (FunctionalShading
-            (Matrix 300 0 0 300 150 50)
-            (ColorFunction2 RGBSpace $ calculator2 $ \x y ->
-                (1-x,
-                 0.5 * (1 + Expr.sinDeg ((360*5) * Expr.sqrt (x*x+y*y))),
-                 1-y)))
-        (addShape $ Rectangle (150:+50) (450 :+ 350))
+functionalShadingTest :: PDFReference PDFPage -> PDF ()
+functionalShadingTest page = do
+    funcObj <-
+        createFunction2Object $ calculator2 $ \x y ->
+            (1-x,
+             0.5 * (1 + Expr.sinDeg ((360*5) * Expr.sqrt (x*x+y*y))),
+             1-y)
+    drawWithPage page $
+        paintWithShading
+            (FunctionalShading
+                (Matrix 300 0 0 300 150 50)
+                (ColorFunction2 RGBSpace $ GlobalFunction2 funcObj))
+            (addShape $ Rectangle (150:+50) (450 :+ 350))
 
 transparencyTest :: Rectangle -> SoftMask -> Draw ()
 transparencyTest rectB softMask = do
@@ -386,7 +399,7 @@ instance ParagraphStyle MyVertStyles MyParaStyles  where
                         textStart 0 0
                         setFont (PDFFont theFont fontSize)
                         displayGlyphs (glyph c)
-                    paintWithShading (AxialShading 0 (- getDescent theFont fontSize) w' (getHeight theFont fontSize - getDescent theFont fontSize) (ColorFunction1 RGBSpace $ Interpolated1 1 (1,0,0) (0,0,1))) (addShape charRect)
+                    paintWithShading (AxialShading 0 (- getDescent theFont fontSize) w' (getHeight theFont fontSize - getDescent theFont fontSize) (ColorFunction1 RGBSpace $ InlinedInterpolated1 1 (1,0,0) (0,0,1))) (addShape charRect)
         in
         (BluePara theFont w', c':l)
     
@@ -716,14 +729,12 @@ testAll timesRoman timesBold helveticaBold symbol zapf jpg = do
         patternTest page7
         
      page8 <- addPage Nothing
-     newSection "Shading" Nothing Nothing $ do
-        drawWithPage page8 $ do
-          shadingTest
-          
+     newSection "Shading" Nothing Nothing $
+        shadingTest page8
+
      page8a <- addPage Nothing
-     newSection "FunctionalShading" Nothing Nothing $ do
-        drawWithPage page8a $ do
-          functionalShadingTest
+     newSection "FunctionalShading" Nothing Nothing $
+        functionalShadingTest page8a
 
      page8b <- addPage Nothing
      newSection "Transparency" Nothing Nothing $ do
@@ -733,7 +744,7 @@ testAll timesRoman timesBold helveticaBold symbol zapf jpg = do
                     (paintWithShading
                         (AxialShading 300 300 600 400
                             (ColorFunction1 GraySpace $
-                             Interpolated1 1  0.8 0.02))
+                             InlinedInterpolated1 1  0.8 0.02))
                         (addShape rectB))
             drawWithPage page8b $
                 transparencyTest rectB softMask

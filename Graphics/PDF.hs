@@ -57,13 +57,15 @@ module Graphics.PDF
   -- ** Transparency
   , module Graphics.PDF.Transparency
   , ColorSpace(..)
-  , Formula(..)
   , calculator1
   , calculator2
   , ColorFunction1(..)
   , ColorFunction2(..)
   , Function1(..)
   , Function2(..)
+  , InlinedFunction1(..)
+  , InlinedFunction2(..)
+  , FunctionObject
   -- ** Fonts
   , module Graphics.PDF.Fonts.Font 
   , module Graphics.PDF.Fonts.StandardFont
