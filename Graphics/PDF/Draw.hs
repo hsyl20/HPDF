@@ -83,8 +83,9 @@ module Graphics.PDF.Draw(
  , ColorFunction2(..)
  , Function1(..)
  , Function2(..)
- , InlinedFunction1(..)
  , InlinedFunction2(..)
+ , Global
+ , Local
  , linearStitched
  , FunctionObject(FunctionObject, FunctionStream)
  , rsrcFromCalculator
@@ -855,7 +856,7 @@ rsrcFromInterpolated domain n a b =
 rsrcFromStitched ::
     (ColorTuple a, Expr.Result e) =>
     PDFDictionary ->
-    InlinedFunction1 a e -> [(PDFFloat, InlinedFunction1 a e)] -> PDFDictionary
+    Function1 Local a e -> [(PDFFloat, Function1 Local a e)] -> PDFDictionary
 rsrcFromStitched domain part parts =
     let funcs = part : map snd parts in
     pdfDictUnion domain . dictFromList $
@@ -905,7 +906,7 @@ rangeEntry func =
 data ColorFunction1 =
     forall a e.
     (ColorTuple a, Expr.Result e) =>
-    ColorFunction1 (ColorSpace a e) (InlinedFunction1 a e)
+    ColorFunction1 (ColorSpace a e) (Function1 Local a e)
 
 instance Eq ColorFunction1 where
     ColorFunction1 spaceA funcA == ColorFunction1 spaceB funcB  =
@@ -948,31 +949,61 @@ instance Ord ColorFunction2 where
             (RGBSpace,  _) -> LT; (_, RGBSpace)  -> GT
 
 
-data InlinedFunction1 a e =
-      GlobalFunction1 (FunctionObject (PDFFloat -> a) (ExprFloat -> e))
-    | InlinedInterpolated1 PDFFloat a a
-    | InlinedStitched1 (InlinedFunction1 a e) [(PDFFloat, InlinedFunction1 a e)]
-    deriving (Eq, Ord)
+data Global
+data Local
 
-data Function1 a e =
-      Sampled1 (Array Int a)
-    | Interpolated1 PDFFloat a a
-    | Stitched1 (InlinedFunction1 a e) [(PDFFloat, InlinedFunction1 a e)]
-    | Calculator1 (ExprFloat -> e)
+data Function1 scope a e where
+    GlobalFunction1 ::
+        FunctionObject (PDFFloat -> a) (ExprFloat -> e) ->
+        Function1 Local a e
+    Sampled1 :: Array Int a -> Function1 Global a e
+    Interpolated1 :: PDFFloat -> a -> a -> Function1 scope a e
+    Stitched1 ::
+        Function1 Local a e -> [(PDFFloat, Function1 Local a e)] ->
+        Function1 scope a e
+    Calculator1 :: (ExprFloat -> e) -> Function1 Global a e
+
+instance
+    (Local ~ scope, ColorTuple a, Eq a, Expr.Result e) =>
+        Eq (Function1 scope a e) where
+    a==b =
+        case (a,b) of
+            (GlobalFunction1 fa, GlobalFunction1 fb) -> fa == fb
+            (Interpolated1 na xa ya, Interpolated1 nb xb yb) ->
+                (na, xa, ya) == (nb, xb, yb)
+            (Stitched1 partA partsA, Stitched1 partB partsB) ->
+                (partA, partsA) == (partB, partsB)
+            _ -> False
+
+instance
+    (Local ~ scope, ColorTuple a, Ord a, Expr.Result e) =>
+        Ord (Function1 scope a e) where
+    compare a b =
+        case (a,b) of
+            (GlobalFunction1 fa, GlobalFunction1 fb) -> compare fa fb
+            (Interpolated1 na xa ya, Interpolated1 nb xb yb) ->
+                compare (na, xa, ya) (nb, xb, yb)
+            (Stitched1 partA partsA, Stitched1 partB partsB) ->
+                compare (partA, partsA) (partB, partsB)
+            (GlobalFunction1 _, _) -> LT
+            (_, GlobalFunction1 _) -> GT
+            (Interpolated1 _ _ _, _) -> LT
+            (_, Interpolated1 _ _ _) -> GT
+
 
 -- ToDo: would be more type-safe with non-empty: NonEmpty (NonEmpty [])
 mapAdjacent :: (a -> a -> b) -> [a] -> [b]
 mapAdjacent f xs = zipWith f xs (tail xs)
 
 linearStitched ::
-    (ColorTuple a) => a -> [(PDFFloat, a)] -> a -> InlinedFunction1 a e
+    (ColorTuple a) => a -> [(PDFFloat, a)] -> a -> Function1 Local a e
 linearStitched firstY nodes lastY =
-    case mapAdjacent (InlinedInterpolated1 1)
+    case mapAdjacent (Interpolated1 1)
             (firstY : map snd nodes ++ lastY : []) of
         [] -> error "list should be non-empty by construction"
-        part:parts -> InlinedStitched1 part (zip (map fst nodes) parts)
+        part:parts -> Stitched1 part (zip (map fst nodes) parts)
 
-calculator1 :: (ExprFloat -> e) -> Function1 a e
+calculator1 :: (ExprFloat -> e) -> Function1 Global a e
 calculator1 = Calculator1
 
 domain1Dict :: (ColorTuple a) => f a e -> PDFDictionary
@@ -983,16 +1014,16 @@ domain1Dict func =
     ]
 
 instance
-    (ColorTuple a, Expr.Result e) =>
-        PdfResourceObject (InlinedFunction1 a e) where
+    (Local ~ scope, ColorTuple a, Expr.Result e) =>
+        PdfResourceObject (Function1 scope a e) where
     toRsrc func =
         let domain = domain1Dict func in
         case func of
             GlobalFunction1 (FunctionObject obj) -> AnyPdfObject obj
             GlobalFunction1 (FunctionStream obj) -> AnyPdfObject obj
-            InlinedInterpolated1 n x y ->
+            Interpolated1 n x y ->
                 AnyPdfObject $ rsrcFromInterpolated domain n x y
-            InlinedStitched1 part parts ->
+            Stitched1 part parts ->
                 AnyPdfObject $ rsrcFromStitched domain part parts
 
 

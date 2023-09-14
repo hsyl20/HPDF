@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 ---------------------------------------------------------
 -- |
 -- Copyright   : (c) 2006-2016, alpheccar.org
@@ -36,7 +37,8 @@ type ExprFloat = PDFExpression PDFFloat
 
 createFunction1Object ::
     (ColorTuple a, Expr.Result e) =>
-    Function1 a e -> PDF (FunctionObject (PDFFloat -> a) (ExprFloat -> e))
+    Function1 Global a e ->
+    PDF (FunctionObject (PDFFloat -> a) (ExprFloat -> e))
 createFunction1Object func =
     let domain = domain1Dict func in
     case func of

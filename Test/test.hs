@@ -74,7 +74,7 @@ shadingTest page = do
             (addShape $ Rectangle 0 (300 :+ 300))
         paintWithShading
             (AxialShading 300 300 600 400
-                (ColorFunction1 GraySpace $ InlinedInterpolated1 1  0.8 0.02))
+                (ColorFunction1 GraySpace $ Interpolated1 1  0.8 0.02))
             (addShape $ Ellipse 300 300 600 400)
 
 functionalShadingTest :: PDFReference PDFPage -> PDF ()
@@ -399,7 +399,7 @@ instance ParagraphStyle MyVertStyles MyParaStyles  where
                         textStart 0 0
                         setFont (PDFFont theFont fontSize)
                         displayGlyphs (glyph c)
-                    paintWithShading (AxialShading 0 (- getDescent theFont fontSize) w' (getHeight theFont fontSize - getDescent theFont fontSize) (ColorFunction1 RGBSpace $ InlinedInterpolated1 1 (1,0,0) (0,0,1))) (addShape charRect)
+                    paintWithShading (AxialShading 0 (- getDescent theFont fontSize) w' (getHeight theFont fontSize - getDescent theFont fontSize) (ColorFunction1 RGBSpace $ Interpolated1 1 (1,0,0) (0,0,1))) (addShape charRect)
         in
         (BluePara theFont w', c':l)
     
@@ -744,7 +744,7 @@ testAll timesRoman timesBold helveticaBold symbol zapf jpg = do
                     (paintWithShading
                         (AxialShading 300 300 600 400
                             (ColorFunction1 GraySpace $
-                             InlinedInterpolated1 1  0.8 0.02))
+                             Interpolated1 1  0.8 0.02))
                         (addShape rectB))
             drawWithPage page8b $
                 transparencyTest rectB softMask
