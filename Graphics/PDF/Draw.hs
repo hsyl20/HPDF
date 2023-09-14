@@ -85,10 +85,12 @@ module Graphics.PDF.Draw(
  , Function2(..)
  , InlinedFunction1(..)
  , InlinedFunction2(..)
+ , linearStitched
  , FunctionObject(FunctionObject, FunctionStream)
  , rsrcFromCalculator
  , rsrcFromInterpolated
  , rsrcFromSampled
+ , rsrcFromStitched
  , ColorTuple
  , domain1Dict
  , domain2Dict
@@ -844,11 +846,24 @@ rsrcFromInterpolated ::
     PDFDictionary -> PDFFloat -> a -> a -> PDFDictionary
 rsrcFromInterpolated domain n a b =
     pdfDictUnion domain . dictFromList $
-                            [ entry "FunctionType" (PDFInteger $ 2)
+                            [ entry "FunctionType" (PDFInteger 2)
                             , entry "C0" (colorComponents a)
                             , entry "C1" (colorComponents b)
                             , entry "N" n
                             ]
+
+rsrcFromStitched ::
+    (ColorTuple a, Expr.Result e) =>
+    PDFDictionary ->
+    InlinedFunction1 a e -> [(PDFFloat, InlinedFunction1 a e)] -> PDFDictionary
+rsrcFromStitched domain part parts =
+    let funcs = part : map snd parts in
+    pdfDictUnion domain . dictFromList $
+        [ entry "FunctionType" (PDFInteger 3)
+        , entry "Bounds" (map fst parts)
+        , entry "Encode" (concatMap (const [0,1::Int]) funcs)
+        , entry "Functions" (map toRsrc funcs)
+        ]
 
 rsrcFromCalculator ::
     (Expr.Function f) => PDFDictionary -> f -> PDFStream
@@ -936,12 +951,26 @@ instance Ord ColorFunction2 where
 data InlinedFunction1 a e =
       GlobalFunction1 (FunctionObject (PDFFloat -> a) (ExprFloat -> e))
     | InlinedInterpolated1 PDFFloat a a
+    | InlinedStitched1 (InlinedFunction1 a e) [(PDFFloat, InlinedFunction1 a e)]
     deriving (Eq, Ord)
 
 data Function1 a e =
       Sampled1 (Array Int a)
     | Interpolated1 PDFFloat a a
+    | Stitched1 (InlinedFunction1 a e) [(PDFFloat, InlinedFunction1 a e)]
     | Calculator1 (ExprFloat -> e)
+
+-- ToDo: would be more type-safe with non-empty: NonEmpty (NonEmpty [])
+mapAdjacent :: (a -> a -> b) -> [a] -> [b]
+mapAdjacent f xs = zipWith f xs (tail xs)
+
+linearStitched ::
+    (ColorTuple a) => a -> [(PDFFloat, a)] -> a -> InlinedFunction1 a e
+linearStitched firstY nodes lastY =
+    case mapAdjacent (InlinedInterpolated1 1)
+            (firstY : map snd nodes ++ lastY : []) of
+        [] -> error "list should be non-empty by construction"
+        part:parts -> InlinedStitched1 part (zip (map fst nodes) parts)
 
 calculator1 :: (ExprFloat -> e) -> Function1 a e
 calculator1 = Calculator1
@@ -957,11 +986,14 @@ instance
     (ColorTuple a, Expr.Result e) =>
         PdfResourceObject (InlinedFunction1 a e) where
     toRsrc func =
+        let domain = domain1Dict func in
         case func of
             GlobalFunction1 (FunctionObject obj) -> AnyPdfObject obj
             GlobalFunction1 (FunctionStream obj) -> AnyPdfObject obj
             InlinedInterpolated1 n x y ->
-                AnyPdfObject $ rsrcFromInterpolated (domain1Dict func) n x y
+                AnyPdfObject $ rsrcFromInterpolated domain n x y
+            InlinedStitched1 part parts ->
+                AnyPdfObject $ rsrcFromStitched domain part parts
 
 
 data InlinedFunction2 a e =

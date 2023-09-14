@@ -46,6 +46,9 @@ createFunction1Object func =
         Interpolated1 n x y ->
             fmap FunctionObject $ addObject $
             Draw.rsrcFromInterpolated domain n x y
+        Stitched1 part parts ->
+            fmap FunctionObject $ addObject $
+            Draw.rsrcFromStitched domain part parts
         Sampled1 arr ->
             fmap FunctionStream $ addObject $
             Draw.rsrcFromSampled domain (\bnds -> [Array.rangeSize bnds]) arr

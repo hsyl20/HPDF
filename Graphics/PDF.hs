@@ -65,6 +65,7 @@ module Graphics.PDF
   , Function2(..)
   , InlinedFunction1(..)
   , InlinedFunction2(..)
+  , linearStitched
   , FunctionObject
   -- ** Fonts
   , module Graphics.PDF.Fonts.Font 
