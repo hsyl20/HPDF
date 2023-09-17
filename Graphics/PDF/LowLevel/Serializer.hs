@@ -22,6 +22,7 @@ import Data.Word
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Binary.Builder as BU
 import qualified Data.ByteString.Lazy.Char8 as C
+import Foreign.C.Types(CShort(..))
 import Foreign.Ptr(Ptr)
 import Data.ByteString.Internal
 import qualified Data.ByteString.Lazy.Internal as L(ByteString(..))
@@ -29,7 +30,8 @@ import qualified Data.ByteString.Lazy.Internal as L(ByteString(..))
 import System.IO.Unsafe
 
 foreign import ccall "conversion.h c_floatToString" cfloatToString :: Double -> Ptr Word8 -> IO Int
-foreign import ccall "conversion.h c_shortToString" cshortToString :: Int -> Ptr Word8 -> IO Int
+-- FixMe: unused
+foreign import ccall "conversion.h c_shortToString" _cshortToString :: CShort -> Ptr Word8 -> IO Int
 
 
 
@@ -51,17 +53,14 @@ instance SerializeValue B.ByteString [Char] where
     
 instance SerializeValue B.ByteString B.ByteString where
     serialize = id
-    
-convertShort :: Int -> ByteString    
-convertShort a = unsafePerformIO (createAndTrim 12 (cshortToString a))
-{-# NOINLINE convertShort #-}
+
 
 convertFloat :: Double -> ByteString  
 convertFloat a = unsafePerformIO (createAndTrim 12 (cfloatToString a))
 {-# NOINLINE convertFloat #-}
     
 instance SerializeValue B.ByteString Int where
-    serialize a = L.Chunk (convertShort a) L.Empty
+    serialize = C.pack . show
  
 instance SerializeValue B.ByteString Double where
     serialize a = L.Chunk (convertFloat a) L.Empty
