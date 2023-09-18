@@ -12,7 +12,6 @@ tested-with: GHC==7.10.2
 homepage: http://www.alpheccar.org
 description: A PDF library with support for several pages, page transitions, outlines, annotations, compression, colors, shapes, patterns, jpegs, fonts, typesetting ... Have a look at the "Graphics.PDF.Documentation" module to see how to use it. Or, download the package and look at the test.hs file in the Test folder. That file is giving an example of each feature.
 extra-source-files:
-  cbits/conversion.h
   Test/logo.jpg
   Test/Makefile
   Test/Penrose.hs
@@ -91,11 +90,6 @@ library
 
   ghc-options: -Wall -funbox-strict-fields  -O2
 
-  C-Sources:  
-     cbits/conversion.c
-  Include-Dirs: cbits
-  Install-Includes: 
-     conversion.h
   exposed-Modules: 
      Graphics.PDF
      Graphics.PDF.Colors

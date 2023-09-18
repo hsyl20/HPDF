@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -fno-cse #-}
-{-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 ---------------------------------------------------------
@@ -17,21 +16,13 @@
 module Graphics.PDF.LowLevel.Serializer(
   SerializeValue(..)
  ) where
-   
-import Data.Word 
+
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Binary.Builder as BU
 import qualified Data.ByteString.Lazy.Char8 as C
-import Foreign.C.Types(CShort(..))
-import Foreign.Ptr(Ptr)
-import Data.ByteString.Internal
-import qualified Data.ByteString.Lazy.Internal as L(ByteString(..))
-
-import System.IO.Unsafe
-
-foreign import ccall "conversion.h c_floatToString" cfloatToString :: Double -> Ptr Word8 -> IO Int
--- FixMe: unused
-foreign import ccall "conversion.h c_shortToString" _cshortToString :: CShort -> Ptr Word8 -> IO Int
+import Data.ByteString.Internal (c2w)
+import Data.Word (Word8)
+import Text.Printf (printf)
 
 
 
@@ -55,15 +46,11 @@ instance SerializeValue B.ByteString B.ByteString where
     serialize = id
 
 
-convertFloat :: Double -> ByteString  
-convertFloat a = unsafePerformIO (createAndTrim 12 (cfloatToString a))
-{-# NOINLINE convertFloat #-}
-    
 instance SerializeValue B.ByteString Int where
     serialize = C.pack . show
  
 instance SerializeValue B.ByteString Double where
-    serialize a = L.Chunk (convertFloat a) L.Empty
+    serialize = C.pack . printf "%.5f"
 
     
 instance SerializeValue BU.Builder Word8 where
