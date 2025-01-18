@@ -33,10 +33,12 @@ module Graphics.PDF.Pages(
  , setPageResource
  , setPageAnnotations
  , readType1Font
+ , readType1FontWithEncoding
  , mkType1Font
  ) where
-     
+
 import qualified Data.IntMap as IM
+import Graphics.PDF.Fonts.Encoding(Encodings(..))
 import Control.Monad.State
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Draw
@@ -280,18 +282,41 @@ createEmbeddedFont (Type1Data d) = do
     PDFReference s <-  createContent (tell $ fromByteString d) Nothing 
     return (PDFReference s)
 
--- | Create a type 1 font 
-readType1Font :: FilePath 
-              -> FilePath 
-              -> IO (Either ParseError Type1FontStructure)
-readType1Font pfb afmPath  = do 
-  fd <- readFontData pfb 
+-- | Create a type 1 font from pfb and afm files
+readType1Font
+  :: FilePath -- ^ Path to pfb file
+  -> FilePath -- ^ Path to afm file
+  -> IO (Either ParseError Type1FontStructure)
+readType1Font = readType1FontWithEncoding AdobeStandardEncoding
+
+-- | Create a type 1 font from pfb and afm files, using the specified encoding
+--
+-- Say you've edited a font in fontforge and put a snowman on the
+-- glyph with the name "a" and exported as snowman.pfb, you can
+--
+-- >> readType1FontWithEncoding (OtherEncoding (M.singleton "a" '☃'))  "./snowman.pfb" "./snowman.afm"
+readType1FontWithEncoding
+  :: Encodings
+  -> FilePath -- ^ Path to pfb file
+  -> FilePath -- ^ Path to afm file
+  -> IO (Either ParseError Type1FontStructure)
+readType1FontWithEncoding encoding pfb afmPath = do
+  fd <- readFontData pfb
   result <- readAfmData afmPath
   case result of
     Left pe -> pure $ Left pe
-    Right afm -> Right <$> mkType1FontStructure fd afm 
+    Right afm -> Right <$> mkType1FontStructure encoding fd afm
 
-mkType1Font :: Type1FontStructure -> PDF AnyFont 
-mkType1Font (Type1FontStructure fd fs) = do 
-   ref <- createEmbeddedFont fd 
+-- | Given a correctly parsed output of 'readType1Font' or
+-- 'readType1FontWithEncoding', create a font usable inside the PDF
+--
+-- >>> myFontStructureOrError <- readType1Font "./myfont.pfb" "./myfont.afm"
+-- >>> case myFontStructureOrError of
+-- >>>   Left msg -> error msg
+-- >>>   Right myFontStructure -> run docInfo docRect $ do
+-- >>>       myFont <- mkType1Font myFontStructure
+-- >>>       …
+mkType1Font :: Type1FontStructure -> PDF AnyFont
+mkType1Font (Type1FontStructure fd fs) = do
+   ref <- createEmbeddedFont fd
    return (AnyFont $ Type1Font fs ref)

@@ -57,9 +57,9 @@ readAfmData path = second AFMData . parseAfm path <$> B.readFile path
 parseAfmData :: B.ByteString -> Either ParseError AFMData
 parseAfmData bs = second AFMData $ parseAfm "<bytestring>" bs
 
-mkType1FontStructure :: FontData -> AFMData -> IO Type1FontStructure
-mkType1FontStructure pdfRef (AFMData f)  = do
-  theEncoding <- getEncoding AdobeStandardEncoding
+mkType1FontStructure :: Encodings -> FontData -> AFMData -> IO Type1FontStructure
+mkType1FontStructure encoding pdfRef (AFMData f)  = do
+  theEncoding <- getEncoding encoding
   let theFont = fontToStructure f theEncoding Nothing
   return $ Type1FontStructure pdfRef theFont
 

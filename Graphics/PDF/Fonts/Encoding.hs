@@ -32,6 +32,7 @@ type PostscriptName = String
 
 data Encodings = AdobeStandardEncoding
                | ZapfDingbatsEncoding
+               | OtherEncoding (M.Map PostscriptName Char)
                deriving(Eq)
 
 isLine :: C.ByteString -> Bool
@@ -73,3 +74,4 @@ zapfdingbats = $(embedFile "Encodings/zapfdingbats.txt")
 getEncoding :: Encodings -> IO (M.Map PostscriptName Char)
 getEncoding AdobeStandardEncoding = parseGlyphListEncoding glyphlist
 getEncoding ZapfDingbatsEncoding= parseGlyphListEncoding zapfdingbats
+getEncoding (OtherEncoding enc) = pure enc

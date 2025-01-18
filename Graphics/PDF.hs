@@ -72,7 +72,10 @@ module Graphics.PDF
   , module Graphics.PDF.Fonts.StandardFont
   , module Graphics.PDF.Fonts.Type1
   , readType1Font
+  , readType1FontWithEncoding
   , mkType1Font
+  , PostscriptName
+  , Encodings(..)
   -- ** Typesetting
   , module Graphics.PDF.Typesetting
   ) where
@@ -112,6 +115,7 @@ import qualified Data.Text as T
 import Graphics.PDF.Fonts.Font 
 import Graphics.PDF.Fonts.StandardFont
 import Graphics.PDF.Fonts.Type1
+import Graphics.PDF.Fonts.Encoding (Encodings(..), PostscriptName)
 
 -- | Create a new PDF document and return a first page
 -- The page is using the document size by default
