@@ -15,6 +15,7 @@
 ---------------------------------------------------------
 module Graphics.PDF.Fonts.Encoding(
       getEncoding
+    , unionEncodings
     , Encodings(..)
     , PostscriptName
     , parseMacEncoding
@@ -75,3 +76,13 @@ getEncoding :: Encodings -> IO (M.Map PostscriptName Char)
 getEncoding AdobeStandardEncoding = parseGlyphListEncoding glyphlist
 getEncoding ZapfDingbatsEncoding= parseGlyphListEncoding zapfdingbats
 getEncoding (OtherEncoding enc) = pure enc
+
+-- Merge two encodings enc1 and enc2; it prefers enc1 when duplicate keys are encountered
+--
+-- This example will overwrite the glyph name "a" in AdobeStandardEncoding:
+-- >>> unionEncodings (OtherEncoding (M.singleton "a" '☃')) AdobeStandardEncoding
+unionEncodings :: Encodings -> Encodings -> IO Encodings
+unionEncodings enc1 enc2 = do
+  edata1 <- getEncoding enc1
+  edata2 <- getEncoding enc2
+  pure (OtherEncoding (M.union edata1 edata2))
