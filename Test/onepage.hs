@@ -79,8 +79,8 @@ testAll theFont@(PDFFont f s) = do
         
 main :: IO()
 main = do
-    fontData <- readType1Font testFont afm
-    Just timesRoman <- mkStdFont Times_Roman 
+    Right fontData <- readType1Font testFont afm
+    Right timesRoman <- mkStdFont Times_Roman
     let rect = PDFRect 0 0 600 400
     runPdf "demo.pdf" (standardDocInfo { author= "alpheccar éèçàü", compressed = False}) rect $ do
         testFont <- mkType1Font fontData
