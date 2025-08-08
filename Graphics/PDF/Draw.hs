@@ -1124,17 +1124,17 @@ instance PdfResourceObject SoftMask where
 applyMatrix :: Matrix -> Draw ()
 applyMatrix m@(Matrix a b c d e f)  = do
     multiplyCurrentMatrixWith m
-    tell . mconcat $[ serialize '\n'
-                    , toPDF a
-                    , serialize ' '
-                    , toPDF b
-                    , serialize ' '
-                    , toPDF c
-                    , serialize ' '
-                    , toPDF d
-                    , serialize ' '
-                    , toPDF e
-                    , serialize ' '
-                    , toPDF f
-                    , serialize " cm"
-                    ]
+    tell . mconcat $ [ serialize '\n'
+                     , toPDF a
+                     , serialize ' '
+                     , toPDF b
+                     , serialize ' '
+                     , toPDF c
+                     , serialize ' '
+                     , toPDF d
+                     , serialize ' '
+                     , toPDF e
+                     , serialize ' '
+                     , toPDF f
+                     , serialize " cm"
+                     ]

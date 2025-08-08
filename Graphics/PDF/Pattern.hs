@@ -131,21 +131,21 @@ setUncoloredFillPattern ref col = do
        colorMap <- gets colorSpaces
        (newColorName,_) <- setResource "ColorSpace" PatternRGB colorMap
        newName <- registerPattern ref
-       tell . mconcat $[ serialize "\n/"
-                       , serialize newColorName
-                       , serialize " cs"
-                       ]
-       tell . mconcat $[ serialize '\n'
-                       , toPDF r
-                       , serialize ' '
-                       , toPDF g
-                       , serialize ' '
-                       , toPDF b
-                       , serialize ' '
-                       , serialize " /"
-                       , serialize newName
-                       , serialize " scn"
-                       ]
+       tell . mconcat $ [ serialize "\n/"
+                        , serialize newColorName
+                        , serialize " cs"
+                        ]
+       tell . mconcat $ [ serialize '\n'
+                        , toPDF r
+                        , serialize ' '
+                        , toPDF g
+                        , serialize ' '
+                        , toPDF b
+                        , serialize ' '
+                        , serialize " /"
+                        , serialize newName
+                        , serialize " scn"
+                        ]
 
 -- | Set the stroke pattern
 setUncoloredStrokePattern :: PDFReference PDFUncoloredPattern -> Color -> Draw ()
@@ -154,10 +154,10 @@ setUncoloredStrokePattern ref col = do
     colorMap <- gets colorSpaces
     (newColorName,_) <- setResource "ColorSpace" PatternRGB colorMap
     newName <- registerPattern ref
-    tell . mconcat $[ serialize "\n/" 
-                    , serialize newColorName
-                    , serialize " CS"
-                    ]
+    tell . mconcat $ [ serialize "\n/" 
+                     , serialize newColorName
+                     , serialize " CS"
+                     ]
     tell . mconcat $   [ serialize '\n'
                        , toPDF r
                        , serialize ' '

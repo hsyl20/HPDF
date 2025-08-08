@@ -251,20 +251,20 @@ rise v = PDFText $ do
 -- | Set the text transformation matrix
 setTextMatrix :: Matrix -> PDFText()
 setTextMatrix (Matrix a b c d e f) = 
-    tell . mconcat $[ serialize '\n'
-                    , toPDF a
-                    , serialize ' '
-                    , toPDF b
-                    , serialize ' '
-                    , toPDF c
-                    , serialize ' '
-                    , toPDF d
-                    , serialize ' '
-                    , toPDF e
-                    , serialize ' '
-                    , toPDF f
-                    , serialize " Tm"
-                    ]
+    tell . mconcat $ [ serialize '\n'
+                     , toPDF a
+                     , serialize ' '
+                     , toPDF b
+                     , serialize ' '
+                     , toPDF c
+                     , serialize ' '
+                     , toPDF d
+                     , serialize ' '
+                     , toPDF e
+                     , serialize ' '
+                     , toPDF f
+                     , serialize " Tm"
+                     ]
     
 -- | Utility function to quickly display one line of text
 text :: PDFFont

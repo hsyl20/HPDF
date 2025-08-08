@@ -80,10 +80,10 @@ applyShading shade = do
         registerResource "Shading"
             shadings (\newMap s -> s { shadings = newMap })
             shade
-    tell . mconcat $[ serialize "\n/" 
-                    , serialize newName
-                    , serialize " sh"
-                    ]
+    tell . mconcat $ [ serialize "\n/" 
+                     , serialize newName
+                     , serialize " sh"
+                     ]
     
 paintWithShading :: PDFShading -- ^ Shading
                  -> Draw a -- ^ Shape to paint

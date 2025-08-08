@@ -151,17 +151,17 @@ instance Shape Polygon where
 
 -- | Set pen width
 setWidth :: MonadPath m => PDFFloat -> m ()
-setWidth w = tell . mconcat $[ serialize "\n" 
-                             , toPDF w
-                             , serialize " w"
-                             ]
+setWidth w = tell . mconcat $ [ serialize "\n" 
+                              , toPDF w
+                              , serialize " w"
+                              ]
 
 -- | Set pen width
 setMiterLimit :: MonadPath m => PDFFloat -> m ()
-setMiterLimit w = tell . mconcat $[ serialize "\n" 
-                                  , toPDF w
-                                  , serialize " M"
-                                  ]
+setMiterLimit w = tell . mconcat $ [ serialize "\n" 
+                                   , toPDF w
+                                   , serialize " M"
+                                   ]
 
 -- | Line cap styles
 data CapStyle = ButtCap
@@ -177,17 +177,17 @@ data JoinStyle = MiterJoin
                             
 -- | Set line cap
 setLineCap :: MonadPath m => CapStyle -> m ()
-setLineCap w = tell . mconcat $[ serialize "\n " 
-                               , toPDF (fromEnum  w)
-                               , serialize " J"
-                               ]
+setLineCap w = tell . mconcat $ [ serialize "\n " 
+                                , toPDF (fromEnum  w)
+                                , serialize " J"
+                                ]
 
 -- | Set line join
 setLineJoin :: MonadPath m => JoinStyle -> m ()
-setLineJoin w = tell . mconcat $[ serialize "\n " 
-                                , toPDF (fromEnum  w)
-                                , serialize " j"
-                                ]
+setLineJoin w = tell . mconcat $ [ serialize "\n " 
+                                 , toPDF (fromEnum  w)
+                                 , serialize " j"
+                                 ]
 
 data DashPattern = DashPattern ![PDFFloat] PDFFloat deriving(Eq)
 
@@ -247,10 +247,10 @@ moveto a = do
 lineto :: Point 
        -> Draw () 
 lineto a = do
-    tell . mconcat $[ serialize "\n" 
-                    , toPDF a
-                    , serialize " l"
-                    ]
+    tell . mconcat $ [ serialize "\n" 
+                     , toPDF a
+                     , serialize " l"
+                     ]
     writeDrawST penPosition a
 
 curveto :: Point -> Point -> Point -> Draw ()
