@@ -58,10 +58,10 @@ setStrokeAlpha alpha = do
         registerResource "ExtGState"
             strokeAlphas (\newMap s -> s { strokeAlphas = newMap })
             (StrokeAlpha alpha)
-    tell . mconcat $[ serialize "\n/" 
-                    , serialize newName
-                    , serialize " gs"
-                    ]
+    tell . mconcat $ [ serialize "\n/"
+                     , serialize newName
+                     , serialize " gs"
+                     ]
 
 -- | Set alpha value for transparency
 setFillAlpha :: Double -> Draw ()
@@ -70,10 +70,10 @@ setFillAlpha alpha = do
         registerResource "ExtGState"
             fillAlphas (\newMap s -> s { fillAlphas = newMap })
             (FillAlpha alpha)
-    tell . mconcat $[ serialize "\n/" 
-                    , serialize newName
-                    , serialize " gs"
-                    ]
+    tell . mconcat $ [ serialize "\n/"
+                     , serialize newName
+                     , serialize " gs"
+                     ]
     
 -- | Init the PDF color space to RGB.
 setRGBColorSpace :: Draw ()
@@ -85,46 +85,46 @@ setRGBColorSpace = tell . serialize $ "\n/DeviceRGB CS\n/DeviceRGB cs\n"
 fillColor :: MonadPath m => Color -- ^ Filling color
           -> m ()
 fillColor (Rgb r g b) = do
-    tell . mconcat $[ serialize "\n"
-                    , toPDF r
-                    , serialize ' '
-                    , toPDF g
-                    , serialize ' '
-                    , toPDF b
-                    , serialize " rg" 
-                    ]
+    tell . mconcat $ [ serialize "\n"
+                     , toPDF r
+                     , serialize ' '
+                     , toPDF g
+                     , serialize ' '
+                     , toPDF b
+                     , serialize " rg"
+                     ]
                     
 fillColor (Hsv h s v) = do
         let (r,g,b) = hsvToRgb (h,s,v)
-        tell . mconcat $[ serialize "\n"
-                        , toPDF r
-                        , serialize ' '
-                        , toPDF g
-                        , serialize ' '
-                        , toPDF b
-                        , serialize " rg" 
-                        ]
+        tell . mconcat $ [ serialize "\n"
+                         , toPDF r
+                         , serialize ' '
+                         , toPDF g
+                         , serialize ' '
+                         , toPDF b
+                         , serialize " rg"
+                         ]
 
 -- | Select the drawing color
 strokeColor :: MonadPath m => Color -- ^ Drawing color
             -> m ()
 strokeColor (Rgb r g b) = do
-    tell . mconcat $[ serialize "\n"
-                    , toPDF r
-                    , serialize ' '
-                    , toPDF g
-                    , serialize ' '
-                    , toPDF b
-                    , serialize " RG" 
-                    ]
+    tell . mconcat $ [ serialize "\n"
+                     , toPDF r
+                     , serialize ' '
+                     , toPDF g
+                     , serialize ' '
+                     , toPDF b
+                     , serialize " RG"
+                     ]
 strokeColor (Hsv h s v) = do
     let (r,g,b) = hsvToRgb (h,s,v)
-    tell . mconcat $[ serialize "\n"
-                    , toPDF r
-                    , serialize ' '
-                    , toPDF g
-                    , serialize ' '
-                    , toPDF b
-                    , serialize " RG" 
-                    ]
+    tell . mconcat $ [ serialize "\n"
+                     , toPDF r
+                     , serialize ' '
+                     , toPDF g
+                     , serialize ' '
+                     , toPDF b
+                     , serialize " RG"
+                     ]
 
