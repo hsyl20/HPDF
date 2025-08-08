@@ -7,3 +7,4 @@ test/*.o
 .HTF
 .stack-work
 dist-newstyle
+demo.pdf
