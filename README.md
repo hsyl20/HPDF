@@ -16,9 +16,10 @@ file is giving an example of each feature.
 The library documentation can be accessed on [Hackage](https://hackage.haskell.org/package/HPDF)
 
 
-## TO TEST THE LIBRARY
+## Testing
 
 ```
-cabal run HPDF-demo
-open demo.pdf
+$ cabal test all
+$ cabal run HPDF-demo
+$ open demo.pdf
 ```
