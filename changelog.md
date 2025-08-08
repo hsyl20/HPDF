@@ -1,5 +1,10 @@
 # Changelog for [`HPDF` package](http://hackage.haskell.org/package/HPDF)
 
+## 1.8
+
+   * Added Github CI
+   * Allow specifying encodings and merging them (#17)
+
 ## 1.7
 
    * Add transparency support and more function types (#16)
