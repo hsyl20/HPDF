@@ -1,4 +1,5 @@
 [![Hackage](https://img.shields.io/hackage/v/HPDF.svg)](https://hackage.haskell.org/package/HPDF)
+[![Master CI badge](https://github.com/hsyl20/HPDF/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/hsyl20/HPDF/actions/workflows/ci.yml?query=branch%3Amaster)
 
 HPDF
 ====
