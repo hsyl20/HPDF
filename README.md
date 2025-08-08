@@ -20,5 +20,7 @@ The library documentation can be accessed on [Hackage](https://hackage.haskell.o
 TO TEST THE LIBRARY
 =====================
 
-> stack run HPDF-demo
-> open demo.pdf
+```
+cabal run HPDF-demo
+open demo.pdf
+```
