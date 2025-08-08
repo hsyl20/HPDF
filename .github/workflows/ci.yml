@@ -71,3 +71,6 @@ jobs:
 
     - name: Run tests
       run: cabal test all
+
+    - name: Run the demo
+      run: cabal run HPDF-demo
