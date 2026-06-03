@@ -214,7 +214,6 @@ instance Monad Draw where
     m >>= f  = Draw $ \env -> do
                           a <- unDraw m env
                           unDraw (f a) env
-    return x = Draw $ \_env -> return x
 
 instance MonadReader DrawEnvironment Draw where
    ask       = Draw $ \env -> return (drawEnvironment env)
