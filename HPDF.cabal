@@ -79,8 +79,8 @@ Executable HPDF-Demo
 
 library
   build-depends: 
-      base >= 4 && < 5, 
-      containers, 
+      base >= 4.8 && < 5,
+      containers,
       random >= 1.0, 
       bytestring >= 0.9, 
       array >= 0.1, 
