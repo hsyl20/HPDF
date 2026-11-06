@@ -9,8 +9,8 @@
 --
 -- Embedded TrueType fonts with Unicode text.
 --
--- A TrueType font (@.ttf@, @glyf@ outlines) is embedded whole as a
--- @FontFile2@ and written as a Type0 font over a @CIDFontType2@ descendant,
+-- A TrueType font (@.ttf@, @glyf@ outlines) is embedded, as a subset or
+-- whole, as a @FontFile2@ and written as a Type0 font over a @CIDFontType2@ descendant,
 -- with the @Identity-H@ encoding: a text string is a run of two-byte glyph
 -- ids, which the font's @cmap@ gives for each character. A @ToUnicode@ CMap
 -- maps the glyph ids back to Unicode, so text extracts and copies out of the
@@ -24,7 +24,8 @@
 --
 -- One glyph per character: there is no shaping (no ligatures, no
 -- contextual forms), so scripts that need it (Arabic, Indic) do not render
--- correctly. No kerning is applied. The font is not subset.
+-- correctly. No kerning is applied. By default only the glyphs the
+-- document shows are embedded (see 'mkTrueTypeFontWith').
 ---------------------------------------------------------
 module Graphics.PDF.Fonts.TrueType
   ( TrueTypeFontData
@@ -32,6 +33,10 @@ module Graphics.PDF.Fonts.TrueType
   , readTrueTypeFont
   , parseTrueTypeFont
   , mkTrueTypeFont
+  , mkTrueTypeFontWith
+  , TrueTypeEmbedding (..)
+  , subsetTrueType
+  , trueTypeGlyphComponents
   , trueTypePostScriptName
   , trueTypeCharacters
   ) where
@@ -39,12 +44,14 @@ module Graphics.PDF.Fonts.TrueType
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import qualified Data.IntMap.Strict as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map.Strict as M
 import qualified Data.Vector.Unboxed as V
-import Data.Bits (shiftL, shiftR, (.&.), (.|.))
+import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
 import Data.Char (chr, isAlphaNum, ord)
 import Data.Int (Int16, Int32)
 import Data.List (sortOn)
+import Data.Word (Word64)
 import Control.Monad.Writer (tell)
 import Data.Binary.Builder (fromByteString)
 import Text.Printf (printf)
@@ -52,7 +59,7 @@ import Text.Printf (printf)
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Resources
 import Graphics.PDF.Draw
-import Graphics.PDF.Pages (createContent, addObject)
+import Graphics.PDF.Pages (createContent, addObject, updateObject)
 import Graphics.PDF.Fonts.Font
 
 -- | A parsed TrueType font, not yet in a document.
@@ -284,14 +291,55 @@ instance PdfResourceObject TrueTypeFont where
 
 -- Embedding --------------------------------------------------------------
 
--- | Embeds the font program, its CID font and font descriptor, and a
--- @ToUnicode@ CMap covering every character of the font's @cmap@.
+-- | How much of the font program goes into the document.
+data TrueTypeEmbedding
+  = -- | Only the glyphs the document shows (plus glyph 0 and the
+    -- components of composite glyphs), written when the document is saved.
+    -- The default.
+    EmbedSubset
+  | -- | The whole font file, as it is.
+    EmbedWhole
+  deriving (Eq, Show)
+
+-- | Embeds a subset of the font: 'mkTrueTypeFontWith' 'EmbedSubset'.
 mkTrueTypeFont :: TrueTypeFontData -> PDF AnyFont
-mkTrueTypeFont d = do
-  fontFile <- createContent (embed (ttBytes d) [entry "Length1" (PDFInteger (B.length (ttBytes d)))]) Nothing
+mkTrueTypeFont = mkTrueTypeFontWith EmbedSubset
+
+-- | Embeds the font program, its CID font and font descriptor, and a
+-- @ToUnicode@ CMap.
+--
+-- With 'EmbedSubset', nothing but the font dictionary exists until the
+-- document is saved; then the font program keeps only the glyphs shown
+-- with this font in any page, XObject or pattern (glyph ids unchanged, so
+-- @CIDToGIDMap@ stays @/Identity@ and the content streams are untouched),
+-- @/W@ and the @ToUnicode@ CMap cover those glyphs, and the @BaseFont@
+-- takes a six-letter subset tag (@ABCDEF+Name@). Glyphs reach the subset
+-- through 'Graphics.PDF.Text.recordGlyphs', which the text and typesetting
+-- functions call.
+mkTrueTypeFontWith :: TrueTypeEmbedding -> TrueTypeFontData -> PDF AnyFont
+mkTrueTypeFontWith mode d = do
+  type0 <- addObject emptyDictionary
+  case mode of
+    EmbedWhole -> writeTrueTypeFont d Nothing type0
+    EmbedSubset ->
+      let finalize used = writeTrueTypeFont d (Just (M.findWithDefault IS.empty (ttPsName d) used)) type0
+       in modifyStrict $ \s -> s {fontFinalizers = finalize : fontFinalizers s}
+  pure (AnyFont (TrueTypeFont d type0))
+
+-- | Writes the font's objects and fills in its Type0 dictionary. @Nothing@
+-- embeds the whole font; @Just gs@ a subset with the glyphs @gs@.
+writeTrueTypeFont :: TrueTypeFontData -> Maybe IS.IntSet -> PDFReference PDFDictionary -> PDF ()
+writeTrueTypeFont d subset type0 = do
+  let (program, glyphs, baseName) = case subset of
+        Nothing -> (ttBytes d, Nothing, ttPsName d)
+        Just used -> case subsetTrueType (ttBytes d) used of
+          Right (bytes, kept) -> (bytes, Just kept, subsetTag (ttPsName d) kept ++ "+" ++ ttPsName d)
+          -- a font this module parsed but cannot subset: embed it whole
+          Left _ -> (ttBytes d, Nothing, ttPsName d)
+  fontFile <- createContent (embed program [entry "Length1" (PDFInteger (B.length program))]) Nothing
   descriptor <- addObject . dictFromList $
     [ entry "Type" (PDFName "FontDescriptor")
-    , entry "FontName" (PDFName (ttPsName d))
+    , entry "FontName" (PDFName baseName)
     , entry "Flags" (PDFInteger flags)
     , entry "FontBBox" (map (PDFInteger . perMille d) (ttBBox d))
     , entry "ItalicAngle" (ttItalicAngle d)
@@ -304,7 +352,7 @@ mkTrueTypeFont d = do
   cidFont <- addObject . dictFromList $
     [ entry "Type" (PDFName "Font")
     , entry "Subtype" (PDFName "CIDFontType2")
-    , entry "BaseFont" (PDFName (ttPsName d))
+    , entry "BaseFont" (PDFName baseName)
     , entry "CIDSystemInfo" (dictFromList
         [ entry "Registry" (toAsciiString "Adobe")
         , entry "Ordering" (toAsciiString "Identity")
@@ -312,31 +360,54 @@ mkTrueTypeFont d = do
     , entry "FontDescriptor" descriptor
     , entry "CIDToGIDMap" (PDFName "Identity")
     , entry "DW" (PDFInteger 1000)
-    , entry "W" widths
+    , entry "W" (widthArray d glyphs)
     ]
-  toUnicode <- createContent (embed (toUnicodeCMap d) []) Nothing
-  type0 <- addObject . dictFromList $
+  toUnicode <- createContent (embed (toUnicodeCMap d glyphs) []) Nothing
+  updateObject type0 . dictFromList $
     [ entry "Type" (PDFName "Font")
     , entry "Subtype" (PDFName "Type0")
-    , entry "BaseFont" (PDFName (ttPsName d))
+    , entry "BaseFont" (PDFName baseName)
     , entry "Encoding" (PDFName "Identity-H")
     , entry "DescendantFonts" [cidFont]
     , entry "ToUnicode" toUnicode
     ]
-  pure (AnyFont (TrueTypeFont d type0))
   where
     embed :: B.ByteString -> [(PDFName, AnyPdfObject)] -> Draw ()
     embed bytes extra = do
       modifyStrict $ \s -> s {otherRsrcs = dictFromList extra}
       tell (fromByteString bytes)
     flags = (if ttFixedPitch d then 1 else 0) .|. 32 .|. (if ttItalicAngle d /= 0 then 64 else 0)
-    -- one run: first glyph id, then every advance in order
-    widths = [AnyPdfObject (PDFInteger 0), AnyPdfObject (map (PDFInteger . perMille d) (V.toList (ttAdvances d)))]
 
--- | A CMap from two-byte glyph ids to UTF-16BE, for text extraction. A
--- glyph shared by several characters maps to the lowest one.
-toUnicodeCMap :: TrueTypeFontData -> B.ByteString
-toUnicodeCMap d =
+-- | The @/W@ array: one run per range of consecutive glyph ids, either of
+-- every glyph (@Nothing@) or of the given ones.
+widthArray :: TrueTypeFontData -> Maybe IS.IntSet -> [AnyPdfObject]
+widthArray d glyphs = concat [ [AnyPdfObject (PDFInteger g0), AnyPdfObject (map w run)] | run@(g0 : _) <- runs ]
+  where
+    n = V.length (ttAdvances d)
+    ids = maybe [0 .. n - 1] (filter (< n) . IS.toAscList) glyphs
+    w g = PDFInteger (perMille d (ttAdvances d V.! g))
+    runs = consecutive ids
+    consecutive [] = []
+    consecutive (x : xs) = let (r, rest) = go x xs in (x : r) : consecutive rest
+    go p (y : ys) | y == p + 1 = let (r, rest) = go y ys in (y : r, rest)
+    go _ ys = ([], ys)
+
+-- | A six-letter uppercase tag naming a subset (PDF 32000-1, 9.6.4),
+-- derived from the font and the glyphs it keeps, so the same subset gets
+-- the same tag.
+subsetTag :: String -> IS.IntSet -> String
+subsetTag psName glyphs = take 6 (letters h0)
+  where
+    fnv :: Word64 -> Int -> Word64
+    fnv acc x = (acc `xor` fromIntegral x) * 1099511628211
+    h0 = foldl' fnv 14695981039346656037 (map ord psName ++ IS.toList glyphs)
+    letters h = chr (ord 'A' + fromIntegral (h `mod` 26)) : letters (h `div` 26)
+
+-- | A CMap from two-byte glyph ids to UTF-16BE, for text extraction, for
+-- every glyph of the cmap (@Nothing@) or the given ones. A glyph shared by
+-- several characters maps to the lowest one.
+toUnicodeCMap :: TrueTypeFontData -> Maybe IS.IntSet -> B.ByteString
+toUnicodeCMap d glyphs =
   C.unlines $
     [ "/CIDInit /ProcSet findresource begin"
     , "12 dict begin"
@@ -356,7 +427,8 @@ toUnicodeCMap d =
        ]
   where
     -- control characters (NUL, CR…) would only add noise to extracted text
-    byGlyph = IM.fromListWith min [ (g, c) | (c, g) <- IM.toList (ttCmap d), c >= 0x20, c /= 0x7F ]
+    byGlyph = IM.fromListWith min [ (g, c) | (c, g) <- IM.toList (ttCmap d), c >= 0x20, c /= 0x7F, keep g ]
+    keep g = maybe True (IS.member g) glyphs
     pairs = sortOn fst (IM.toList byGlyph)
     block ps =
       [C.pack (show (length ps) ++ " beginbfchar")]
@@ -364,6 +436,157 @@ toUnicodeCMap d =
         ++ ["endbfchar"]
     chunks _ [] = []
     chunks k xs = let (a, b) = splitAt k xs in a : chunks k b
+
+-- Subsetting -------------------------------------------------------------
+
+-- | A subset of a TrueType font file that keeps the given glyphs, glyph 0
+-- (@.notdef@) and, transitively, the components of the composite glyphs
+-- kept. Glyph ids do not change: the other glyphs become empty, and the
+-- font ends after the highest glyph kept. The font keeps the tables a PDF
+-- font program needs (PDF 32000-1, 9.9: @head@, @hhea@, @maxp@, @hmtx@,
+-- @loca@, @glyf@ and, when the font has them, the hinting tables @cvt @,
+-- @fpgm@ and @prep@); @loca@ is rewritten in the long format.
+-- Returns the font file and the glyphs it kept.
+subsetTrueType :: B.ByteString -> IS.IntSet -> Either String (B.ByteString, IS.IntSet)
+subsetTrueType bs wanted = do
+  check (B.length bs >= 12) "file too short"
+  let numTables = u16 bs 4
+      dir = M.fromList
+        [ (C.unpack (B.take 4 (B.drop o bs)), (u32 bs (o + 8), u32 bs (o + 12)))
+        | i <- [0 .. numTables - 1], let o = 12 + 16 * i, o + 16 <= B.length bs ]
+      table t = case M.lookup t dir of
+        Just (off, len) | off + len <= B.length bs -> Right (B.take len (B.drop off bs))
+        Just _ -> Left ("table " ++ t ++ " runs past the end of the file")
+        Nothing -> Left ("no " ++ t ++ " table")
+      optTable t = either (const Nothing) Just (table t)
+  hd <- table "head"
+  hh <- table "hhea"
+  mx <- table "maxp"
+  hm <- table "hmtx"
+  lc <- table "loca"
+  gl <- table "glyf"
+  check (B.length hd >= 54 && B.length hh >= 36 && B.length mx >= 6) "short head, hhea or maxp table"
+  let numGlyphs = u16 mx 4
+      longLoca = i16 hd 50 /= 0
+      nH = u16 hh 34
+      locaAt g
+        | longLoca = u32 lc (4 * g)
+        | otherwise = 2 * u16 lc (2 * g)
+  check (B.length lc >= (if longLoca then 4 else 2) * (numGlyphs + 1)) "short loca table"
+  check (nH > 0 && B.length hm >= 4 * nH + 2 * (numGlyphs - min nH numGlyphs)) "short hmtx table"
+  let glyphData g
+        | g < 0 || g >= numGlyphs = B.empty
+        | otherwise =
+            let a = locaAt g
+                b = locaAt (g + 1)
+             in if b > a && b <= B.length gl then B.take (b - a) (B.drop a gl) else B.empty
+      kept = closure (glyphComponents . glyphData) numGlyphs (IS.insert 0 wanted)
+      newN = IS.findMax kept + 1
+      glyphsOut = [ if IS.member g kept then pad4 (glyphData g) else B.empty | g <- [0 .. newN - 1] ]
+      offsets = scanl (+) 0 (map B.length glyphsOut)
+      glyf' = B.concat glyphsOut
+      loca' = B.concat (map be32 offsets)
+      nH' = min nH newN
+      lsbOf g
+        | g < nH = i16 hm (4 * g + 2)
+        | otherwise = i16 hm (4 * nH + 2 * (g - nH))
+      hmtx' = B.concat $
+        [ if IS.member g kept then B.take 4 (B.drop (4 * g) hm) else be16 0 <> be16 0 | g <- [0 .. nH' - 1] ]
+          ++ [ be16 (if IS.member g kept then lsbOf g else 0) | g <- [nH' .. newN - 1] ]
+      head' = patch 8 (be32 0) (patch 50 (be16 1) hd)
+      hhea' = patch 34 (be16 nH') hh
+      maxp' = patch 4 (be16 newN) mx
+      tables =
+        [ ("glyf", glyf'), ("head", head'), ("hhea", hhea'), ("hmtx", hmtx')
+        , ("loca", loca'), ("maxp", maxp') ]
+          ++ [ (t, b) | t <- ["cvt ", "fpgm", "prep"], Just b <- [optTable t] ]
+  pure (writeSfnt tables, kept)
+  where
+    check True _ = Right ()
+    check False e = Left e
+
+-- | The glyph ids a glyph of a font file is built from, when it is a
+-- composite glyph (none for a simple glyph, or a glyph id out of range).
+trueTypeGlyphComponents :: B.ByteString -> Int -> [Int]
+trueTypeGlyphComponents bs g = either (const []) id $ do
+  let numTables = u16 bs 4
+      dir = M.fromList
+        [ (C.unpack (B.take 4 (B.drop o bs)), (u32 bs (o + 8), u32 bs (o + 12)))
+        | i <- [0 .. numTables - 1], let o = 12 + 16 * i, o + 16 <= B.length bs ]
+      table t = maybe (Left t) (\(off, len) -> Right (B.take len (B.drop off bs))) (M.lookup t dir)
+  hd <- table "head"
+  mx <- table "maxp"
+  lc <- table "loca"
+  gl <- table "glyf"
+  let locaAt i = if i16 hd 50 /= 0 then u32 lc (4 * i) else 2 * u16 lc (2 * i)
+  if g < 0 || g >= u16 mx 4
+    then Right []
+    else Right (glyphComponents (B.take (locaAt (g + 1) - locaAt g) (B.drop (locaAt g) gl)))
+
+-- | The glyphs reachable from a set through a successor function.
+closure :: (Int -> [Int]) -> Int -> IS.IntSet -> IS.IntSet
+closure next limit start = go IS.empty (filter ok (IS.toList start))
+  where
+    ok g = g >= 0 && g < limit
+    go seen [] = seen
+    go seen (g : rest)
+      | IS.member g seen = go seen rest
+      | otherwise = go (IS.insert g seen) (filter ok (next g) ++ rest)
+
+-- | The glyph ids a composite glyph is built from (none for a simple one).
+glyphComponents :: B.ByteString -> [Int]
+glyphComponents g
+  | B.length g >= 10 && i16 g 0 < 0 = go 10
+  | otherwise = []
+  where
+    go o
+      | o + 4 > B.length g = []
+      | otherwise =
+          let flags = u16 g o
+              args = if flags .&. 0x0001 /= 0 then 4 else 2
+              scale
+                | flags .&. 0x0008 /= 0 = 2
+                | flags .&. 0x0040 /= 0 = 4
+                | flags .&. 0x0080 /= 0 = 8
+                | otherwise = 0
+           in u16 g (o + 2) : if flags .&. 0x0020 /= 0 then go (o + 4 + args + scale) else []
+
+-- | An sfnt file from its tables: directory sorted by tag, tables 4-byte
+-- aligned, checksums and @head.checkSumAdjustment@ set.
+writeSfnt :: [(String, B.ByteString)] -> B.ByteString
+writeSfnt tables0 = patchAdjustment file
+  where
+    tables = sortOn fst tables0
+    n = length tables
+    entrySelector = floor (logBase 2 (fromIntegral n :: Double)) :: Int
+    searchRange = 16 * 2 ^ entrySelector
+    header = be32 0x00010000 <> be16 n <> be16 searchRange <> be16 entrySelector <> be16 (16 * n - searchRange)
+    dirSize = 12 + 16 * n
+    offsets = scanl (+) dirSize [B.length (pad4 b) | (_, b) <- tables]
+    dirEntries = B.concat
+      [ C.pack t <> be32 (checksum b) <> be32 off <> be32 (B.length b)
+      | ((t, b), off) <- zip tables offsets ]
+    file = B.concat (header : dirEntries : [pad4 b | (_, b) <- tables])
+    headOffset = lookup "head" (zip (map fst tables) offsets)
+    patchAdjustment f = case headOffset of
+      Just off -> patch (off + 8) (be32 ((0xB1B0AFBA - checksum f) .&. 0xFFFFFFFF)) f
+      Nothing -> f
+
+checksum :: B.ByteString -> Int
+checksum b = foldl' (\acc i -> (acc + u32 p i) .&. 0xFFFFFFFF) 0 [0, 4 .. B.length p - 4]
+  where p = pad4 b
+
+pad4 :: B.ByteString -> B.ByteString
+pad4 b = b <> B.replicate ((4 - B.length b `mod` 4) `mod` 4) 0
+
+patch :: Int -> B.ByteString -> B.ByteString -> B.ByteString
+patch off new b = B.take off b <> new <> B.drop (off + B.length new) b
+
+be16 :: Int -> B.ByteString
+be16 x = B.pack [fromIntegral (x `shiftR` 8), fromIntegral x]
+
+be32 :: Int -> B.ByteString
+be32 x = B.pack [fromIntegral (x `shiftR` 24), fromIntegral (x `shiftR` 16), fromIntegral (x `shiftR` 8), fromIntegral x]
 
 utf16Hex :: Int -> String
 utf16Hex c

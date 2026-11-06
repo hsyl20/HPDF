@@ -111,6 +111,7 @@ import Data.Monoid
 
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import qualified Data.Binary.Builder as BU
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
@@ -180,6 +181,7 @@ data DrawState = DrawState {
                 ,  shadings :: M.Map PDFShading String
                 ,  softMasks :: M.Map SoftMask String
                 ,  matrix :: [Matrix]
+                ,  usedGlyphs :: M.Map String IS.IntSet -- ^ Glyph ids shown with each subset font, by font name
                 }
 data DrawEnvironment = DrawEnvironment {
                         streamId :: Int
@@ -297,7 +299,7 @@ supplyName = do
 emptyDrawState :: Int -> DrawState
 emptyDrawState ref = 
     let names = (map (("O" ++ (show ref)) ++ ) $ [replicate k ['a'..'z'] | k <- [1..]] >>= sequence) in
-    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity]
+    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty
   
 -- | Execute the drawing commands to get a new state and an uncompressed PDF stream
 runDrawing :: Draw a -> DrawEnvironment -> DrawState -> (a,DrawState,BU.Builder)
@@ -453,6 +455,7 @@ data PdfState = PdfState { supplySrc :: !Int -- ^ Supply of unique identifiers
                          , currentPage :: Maybe (PDFReference PDFPage) -- ^ Reference to the current page used to create outlines
                          , xobjectBound :: !(IM.IntMap (PDFFloat,PDFFloat)) -- ^ Width and height of xobjects
                          , firstOutline :: [Bool] -- ^ Used to improve the outline API
+                         , fontFinalizers :: [M.Map String IS.IntSet -> PDF ()] -- ^ Run when the document is saved, with the glyph ids every stream used per font name (font subsetting)
                          }
                          
 -- | A PDF Page object

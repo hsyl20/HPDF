@@ -56,7 +56,11 @@ Test-Suite HPDF-Tests
   hs-source-dirs:    Test
   Build-depends:     base >= 4, 
                      HTF >= 0.10,
-                     HPDF
+                     HPDF,
+                     bytestring,
+                     containers,
+                     directory,
+                     text
   build-tool-depends:
     HTF:htfpp
   Default-language:  Haskell2010

@@ -93,6 +93,8 @@ import Graphics.PDF.Pattern
 import Graphics.PDF.Navigation
 import Graphics.PDF.Text
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
+import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Lazy as B
 import Data.Int
 import Text.Printf(printf)
@@ -186,9 +188,21 @@ createStreams = do
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length . toLazyByteString $ w'))
 
+-- | Run the font finalizers with the glyph ids each font showed in any
+-- stream. A finalizer may add streams of its own (font programs, CMaps),
+-- which 'createStreams' then writes like any other.
+finalizeFonts :: PDF ()
+finalizeFonts = do
+  fs <- gets fontFinalizers
+  used <- gets (M.unionsWith IS.union . map (usedGlyphs . fst . snd) . IM.elems . streams)
+  modifyStrict $ \s -> s {fontFinalizers = []}
+  mapM_ ($ used) (reverse fs)
+
 -- | Save all the pages and streams in the main object dictionary
 saveObjects :: PDF (PDFReference PDFCatalog)
 saveObjects  = do
+  -- Write the fonts that wait for the glyphs the document used (subsets)
+  finalizeFonts
   -- Save streams to the object dictionary so that they are saved in the PDF document
   createStreams
   infos <- gets docInfo
@@ -277,6 +291,7 @@ defaultPdfSettings =
            , currentPage = Nothing
            , xobjectBound = IM.empty
            , firstOutline = [True]
+           , fontFinalizers = []
            }
 
 createObjectByteStrings :: PdfState -> PDF a -> B.ByteString 

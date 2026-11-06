@@ -6,6 +6,18 @@ import Test.Framework
 import Data.Either (isRight)
 
 import Graphics.PDF.Image(JpegFile, readJpegDataURL, jpegBounds)
+import Graphics.PDF
+import Graphics.PDF.Fonts.TrueType
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as C
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.IntSet as IS
+import qualified Data.Text as T
+import Control.Monad (filterM)
+import Data.Char (isUpper, ord)
+import System.Directory (doesFileExist)
+import System.Environment (lookupEnv)
+import Text.Printf (printf)
 
 main = htfMain htf_thisModulesTests
 
@@ -25,3 +37,135 @@ test_decodeTick = case (readJpegDataURL raw_jpeg) of
 
 test_bounds :: IO()
 test_bounds =  assertEqual raw_jpeg_bounds (jpegBounds jpg)
+
+-- Embedded TrueType fonts --------------------------------------------------
+--
+-- These need a TrueType font on the machine: $HPDF_TEST_TTF, or one of the
+-- usual system paths. Without one they are reported pending.
+
+testFontPaths :: [FilePath]
+testFontPaths =
+  [ "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+  , "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+  , "/usr/share/fonts/TTF/DejaVuSans.ttf"
+  , "/usr/share/fonts/dejavu/DejaVuSans.ttf"
+  ]
+
+withTestFont :: (B.ByteString -> TrueTypeFontData -> IO ()) -> IO ()
+withTestFont k = do
+  env <- lookupEnv "HPDF_TEST_TTF"
+  found <- filterM doesFileExist (maybe id (:) env testFontPaths)
+  case found of
+    [] -> unitTestPending "no TrueType font found (set HPDF_TEST_TTF)"
+    path : _ -> do
+      bytes <- B.readFile path
+      case parseTrueTypeFont bytes of
+        Left e -> assertFailure ("cannot parse " ++ path ++ ": " ++ e)
+        Right d -> k bytes d
+
+glyphOf :: TrueTypeFontData -> Char -> Int
+glyphOf d c = fromIntegral (charGlyph d c)
+
+sampleText :: String
+sampleText = "Привіт, світ! Ça déçoit."
+
+test_subsetKeepsGlyphsAndIds :: IO ()
+test_subsetKeepsGlyphsAndIds = withTestFont $ \bytes d -> do
+  let wanted = IS.fromList (map (glyphOf d) sampleText)
+  case subsetTrueType bytes wanted of
+    Left e -> assertFailure e
+    Right (sub, kept) -> do
+      assertBool (B.length sub < B.length bytes `div` 4)
+      assertBool (IS.member 0 kept)
+      assertBool (wanted `IS.isSubsetOf` kept)
+      -- every composite glyph kept has its components kept
+      assertBool (and [ IS.member c kept | g <- IS.toList kept, c <- trueTypeGlyphComponents bytes g ])
+      -- glyph ids and advances are what they were, the font ends after
+      -- the last glyph kept, and outlines are copied as they are
+      assertEqual (Just (IS.findMax kept + 1)) (fmap (`u16` 4) (sfntTable "maxp" sub))
+      assertEqual [Just (round (glyphWidth d 1000 (fromIntegral g) * fromIntegral (unitsPerEm bytes) / 1000) :: Int) | g <- IS.toList kept]
+                  [advanceOf sub g | g <- IS.toList kept]
+      assertEqual [trueTypeGlyphComponents bytes g | g <- IS.toList kept]
+                  [trueTypeGlyphComponents sub g | g <- IS.toList kept]
+
+-- A few raw sfnt reads, to look at a subset (which has no cmap, so
+-- parseTrueTypeFont does not take it).
+u16 :: B.ByteString -> Int -> Int
+u16 b i = fromIntegral (B.index b i) * 256 + fromIntegral (B.index b (i + 1))
+
+u32 :: B.ByteString -> Int -> Int
+u32 b i = u16 b i * 65536 + u16 b (i + 2)
+
+sfntTable :: String -> B.ByteString -> Maybe B.ByteString
+sfntTable tag b =
+  case [ (u32 b (o + 8), u32 b (o + 12)) | i <- [0 .. u16 b 4 - 1], let o = 12 + 16 * i, C.unpack (B.take 4 (B.drop o b)) == tag ] of
+    (off, len) : _ -> Just (B.take len (B.drop off b))
+    [] -> Nothing
+
+unitsPerEm :: B.ByteString -> Int
+unitsPerEm b = maybe 0 (`u16` 18) (sfntTable "head" b)
+
+advanceOf :: B.ByteString -> Int -> Maybe Int
+advanceOf b g = do
+  hh <- sfntTable "hhea" b
+  hm <- sfntTable "hmtx" b
+  let n = u16 hh 34
+  pure (u16 hm (4 * min g (n - 1)))
+
+test_subsetClosesOverComposites :: IO ()
+test_subsetClosesOverComposites = withTestFont $ \bytes d -> do
+  let composites = [ (g, cs) | c <- ['À' .. 'ž'] ++ ['Ѐ' .. 'ӿ'], let g = glyphOf d c, g /= 0
+                             , let cs = trueTypeGlyphComponents bytes g, not (null cs) ]
+  case composites of
+    [] -> unitTestPending "the test font has no composite glyph in Latin-1/Latin Extended-A/Cyrillic"
+    (g, cs) : _ -> case subsetTrueType bytes (IS.singleton g) of
+      Left e -> assertFailure e
+      Right (_, kept) -> assertBool (all (`IS.member` kept) (g : cs))
+
+test_subsetFontInDocument :: IO ()
+test_subsetFontInDocument = withTestFont $ \bytes d -> do
+  let doc mode = BL.toStrict $ pdfByteString standardDocInfo {compressed = False} (PDFRect 0 0 300 200) $ do
+        font <- mkTrueTypeFontWith mode d
+        page <- addPage Nothing
+        drawWithPage page $ drawText $ text (PDFFont font 12) 10 100 (T.pack sampleText)
+      subset = doc EmbedSubset
+      whole = doc EmbedWhole
+      name = C.pack (trueTypePostScriptName d)
+      afterKey pdf = [ C.takeWhile (\c -> c /= ' ' && c /= '\n' && c /= '/' && c /= '>') (C.drop 11 (C.drop i pdf))
+                     | i <- occurrences (C.pack "/BaseFont /") pdf ]
+      isTagged n = C.length n > 7 && C.all isUpper (C.take 6 n) && C.index n 6 == '+' && C.drop 7 n == name
+  assertBool (B.length subset < B.length whole `div` 4)
+  -- the BaseFont of the Type0 and CID fonts carry an ABCDEF+ subset tag
+  let subsetNames = afterKey subset
+  assertEqual 2 (length subsetNames)
+  assertBool (all isTagged subsetNames)
+  assertEqual [name, name] (afterKey whole)
+  -- the ToUnicode CMap maps the glyphs shown, and only those
+  let cmapLines = filter (C.isPrefixOf (C.pack "<")) (C.lines subset)
+      bfchars = [ l | l <- cmapLines, C.count '<' l == 2, C.length l <= 20 ]
+  assertBool (C.pack (printf "<%04X> <%04X>" (glyphOf d 'П') (ord 'П')) `elem` bfchars)
+  assertBool (length bfchars < 40)
+
+-- | Offsets of every occurrence of a needle.
+occurrences :: B.ByteString -> B.ByteString -> [Int]
+occurrences needle = go 0
+  where
+    go off hay = case B.breakSubstring needle hay of
+      (before, rest)
+        | B.null rest -> []
+        | otherwise -> let i = off + B.length before
+                        in i : go (i + 1) (B.drop 1 rest)
+
+-- | Text set by the typesetting code reaches the subset too (words and the
+-- space glyphs of the glue).
+test_subsetFontTypeset :: IO ()
+test_subsetFontTypeset = withTestFont $ \_ d -> do
+  let pdf = BL.toStrict $ pdfByteString standardDocInfo {compressed = False} (PDFRect 0 0 300 200) $ do
+        font <- mkTrueTypeFont d
+        page <- addPage Nothing
+        drawWithPage page $
+          displayFormattedText (Rectangle (10 :+ 10) (290 :+ 190)) NormalParagraph (Font (PDFFont font 12) black black) $
+            paragraph (txt (T.pack "Съешь же ещё этих мягких французских булок, да выпей чаю."))
+      bfchars = [ l | l <- C.lines pdf, C.isPrefixOf (C.pack "<") l, C.count '<' l == 2, C.length l <= 20 ]
+      mapped c = C.pack (printf "<%04X> <%04X>" (glyphOf d c) (ord c)) `elem` bfchars
+  assertBool (all mapped ("Съешьжеёхфиз ,." :: String))
