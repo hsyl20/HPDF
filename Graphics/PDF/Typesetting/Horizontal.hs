@@ -286,7 +286,9 @@ drawTheTextBox state style x y t = do
   when (state == StartText || state == OneBlock || state == ContinueText) $ (do
       case t of
           Nothing -> return ()
-          Just myText -> tell $ toPDF myText
+          Just myText -> do
+              recordGlyphs (textFont . textStyle $ style) myText
+              tell $ toPDF myText
     )
   when (state == StopText || state == OneBlock) $ (do
       tell rbracket
@@ -302,9 +304,10 @@ drawTextGlue style w = do
         pf@(PDFFont f size) = textFont . textStyle $ style
         delta = w - ws 
         -- a space glyph, then the extra displacement
+        spaceGlyphs = fontGlyphs pf [spaceGlyph f]
         spaceRun | glyphCodeBytes f == 1 = mconcat [lparen, bspace, rparen]
-                 | otherwise = toPDF (fontGlyphs pf [spaceGlyph f])
-    return ()
+                 | otherwise = toPDF spaceGlyphs
+    recordGlyphs pf spaceGlyphs
     tell . mconcat $ [ spaceRun,bspace,toPDF ((-delta) * 1000.0 / (fromIntegral size) ), bspace]  
     
   
