@@ -111,6 +111,7 @@ library
      Graphics.PDF.Fonts.FontTypes
      Graphics.PDF.Fonts.StandardFont
      Graphics.PDF.Fonts.Type1
+     Graphics.PDF.Fonts.TrueType
      Graphics.PDF.Typesetting.WritingSystem
      Graphics.PDF.Navigation
      Graphics.PDF.Image

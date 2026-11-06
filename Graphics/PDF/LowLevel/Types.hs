@@ -182,7 +182,10 @@ instance HasHexaStream PDFGlyph where
         C.concatMap hexChar $ x
 
 
-newtype GlyphCode = GlyphCode Word8 deriving(Eq,Ord,Show,Integral,Bounded,Enum,Real,Num)
+-- | A glyph code. Simple fonts (standard 14, Type1) use one byte per glyph
+-- (0-255); CID-keyed fonts ('Graphics.PDF.Fonts.TrueType') use glyph ids
+-- up to 65535, written as two bytes.
+newtype GlyphCode = GlyphCode Word16 deriving(Eq,Ord,Show,Integral,Bounded,Enum,Real,Num)
 
 
 instance SerializeValue L.ByteString PDFString where

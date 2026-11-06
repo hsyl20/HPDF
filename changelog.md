@@ -1,5 +1,17 @@
 # Changelog for [`HPDF` package](http://hackage.haskell.org/package/HPDF)
 
+## Unreleased
+
+   * Embedded TrueType fonts with Unicode text, `Graphics.PDF.Fonts.TrueType`:
+     `readTrueTypeFont` and `mkTrueTypeFont` write a Type0 font over a
+     CIDFontType2 with the Identity-H encoding, the font program as
+     FontFile2, /W widths and a ToUnicode CMap, so text extracts and copies
+     out as Unicode.
+   * `GlyphCode` is now 16 bits; `IsFont` gains `glyphCodeBytes` (default 1)
+     and `Graphics.PDF.Fonts.Font` exports `encodeGlyphs`/`decodeGlyphs`;
+     `fontGlyphs` builds a glyph run for any font. Standard 14 and Type1
+     fonts write the same bytes as before.
+
 ## 1.8
 
    * Added Github CI
