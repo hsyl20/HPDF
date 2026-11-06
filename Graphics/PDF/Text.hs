@@ -39,6 +39,7 @@ module Graphics.PDF.Text(
    , textWidth
    , pdfGlyph
    , glyph
+   , fontGlyphs
  ) where
 
 import Graphics.PDF.LowLevel.Types
@@ -60,9 +61,10 @@ glyphStreamWidth :: PDFFont
                  -> PDFGlyph 
                  -> PDFFloat
 glyphStreamWidth (PDFFont f s) (PDFGlyph t) = 
- let w = foldl' (\a b -> a + glyphWidth f s (fromIntegral b)) 0 . S.unpack $ t
+ let gs = decodeGlyphs f t
+     w = foldl' (\a b -> a + glyphWidth f s b) 0 gs
  in
-  w + (foldl' (\a (x,y) -> a + getKern f s x y) 0 $ [(GlyphCode ca,GlyphCode cb) | (ca,cb) <- S.zip t (S.tail t)])
+  w + (foldl' (\a (x,y) -> a + getKern f s x y) 0 $ zip gs (drop 1 gs))
 
 textWidth :: PDFFont -> T.Text -> PDFFloat
 textWidth f t = glyphStreamWidth f . pdfGlyph f $ t
@@ -70,7 +72,12 @@ textWidth f t = glyphStreamWidth f . pdfGlyph f $ t
 pdfGlyph :: PDFFont
          -> T.Text 
          -> PDFGlyph 
-pdfGlyph (PDFFont f _) t = PDFGlyph . S.pack . map (fromIntegral . charGlyph f) . T.unpack $ t 
+pdfGlyph (PDFFont f _) t = PDFGlyph . encodeGlyphs f . map (charGlyph f) . T.unpack $ t 
+
+-- | Glyph codes as a glyph run for this font (one or two bytes per glyph,
+-- see 'glyphCodeBytes').
+fontGlyphs :: PDFFont -> [GlyphCode] -> PDFGlyph
+fontGlyphs (PDFFont f _) = PDFGlyph . encodeGlyphs f
 
 
 type FontState = (Set.Set AnyFont)
@@ -153,6 +160,8 @@ textStart x y = tell . mconcat  $ [ serialize '\n'
  --writeCmd $ "\n" ++ (show x) ++ " " ++ (show y) ++ " Td"         
 
 
+ -- | One glyph of a simple (one byte per glyph) font. For a CID-keyed font
+ -- use 'fontGlyphs'.
 glyph :: GlyphCode -> PDFGlyph 
 glyph c = PDFGlyph . S.singleton $ (fromIntegral c)
 
