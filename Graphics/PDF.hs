@@ -84,6 +84,7 @@ module Graphics.PDF
   , module Graphics.PDF.Fonts.Font 
   , module Graphics.PDF.Fonts.StandardFont
   , module Graphics.PDF.Fonts.Type1
+  , module Graphics.PDF.Fonts.TrueType
   , readType1Font
   , readType1FontWithEncoding
   , mkType1Font
@@ -130,6 +131,7 @@ import qualified Data.Text as T
 import Graphics.PDF.Fonts.Font 
 import Graphics.PDF.Fonts.StandardFont
 import Graphics.PDF.Fonts.Type1
+import Graphics.PDF.Fonts.TrueType
 import Graphics.PDF.Fonts.Encoding (unionEncodings, Encodings(..), PostscriptName)
 
 -- Create the PDF stream objects from the draw monads
