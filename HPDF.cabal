@@ -59,7 +59,8 @@ Test-Suite HPDF-Tests
                      HPDF,
                      bytestring,
                      containers,
-                     directory
+                     directory,
+                     text
   build-tool-depends:
     HTF:htfpp
   Default-language:  Haskell2010
