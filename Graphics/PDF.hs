@@ -140,6 +140,7 @@ import Graphics.PDF.Fonts.Encoding (unionEncodings, Encodings(..), PostscriptNam
 import Graphics.PDF.Archive
 import Data.Bits (xor)
 import Data.Word (Word64, Word8)
+import Data.List (sortOn)
 import qualified Data.ByteString as S
 import Control.Monad.Writer (tell)
 import qualified Data.ByteString.Lazy.Char8 as LC
@@ -253,6 +254,15 @@ saveObjects  = do
       r <- addObject $ PDFStream (fromLazyByteString xmp) False (Right (PDFLength (B.length xmp)))
              (dictFromList [entry "Type" (PDFName "Metadata"), entry "Subtype" (PDFName "XML")])
       return [entry "Metadata" r]
+  -- Associated (embedded) files
+  files <- gets (sortOn fst . reverse . associatedFiles)
+  let fileEntries
+        | null files = []
+        | otherwise =
+            [ entry "AF" (map snd files)
+            , entry "Names" (dictFromList [entry "EmbeddedFiles" (dictFromList
+                [entry "Names" (concat [[pdfTextString n, AnyPdfObject r] | (n, r) <- files])])])
+            ]
   -- PDF/A: an indirect Info dictionary that agrees with the metadata
   -- (other documents keep theirs in the trailer, as before)
   info <- case pdfa of
@@ -264,7 +274,7 @@ saveObjects  = do
       ++ [ entry "Producer" (pdfTextString producerName) ]
   -- Create the catalog
   cat <- addObject $ PDFCatalog oref pRef (pageMode infos) (pageLayout infos) (viewerPreferences infos)
-           (metadata ++ intents)
+           (metadata ++ intents ++ fileEntries)
   modifyStrict $ \s -> s {catalog = cat}
   return (cat, info)
  where
@@ -393,6 +403,7 @@ defaultPdfSettings =
            , firstOutline = [True]
            , fontFinalizers = []
            , pdfaSettings = Nothing
+           , associatedFiles = []
            , documentProblems = []
            }
 
