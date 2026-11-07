@@ -462,6 +462,7 @@ data PdfState = PdfState { supplySrc :: !Int -- ^ Supply of unique identifiers
                          , firstOutline :: [Bool] -- ^ Used to improve the outline API
                          , fontFinalizers :: [M.Map String IS.IntSet -> PDF ()] -- ^ Run when the document is saved, with the glyph ids every stream used per font name (font subsetting)
                          , pdfaSettings :: Maybe PDFA -- ^ Write the document as PDF/A (see "Graphics.PDF.Archive")
+                         , associatedFiles :: [(T.Text, PDFReference PDFDictionary)] -- ^ Embedded files (file specifications) by name, most recent first
                          , documentProblems :: [String] -- ^ Why the document does not conform to what was asked of it (PDF/A), found when it is saved
                          }
                          

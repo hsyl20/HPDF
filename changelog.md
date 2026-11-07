@@ -29,6 +29,11 @@
      `pdfByteStringE` returns the document or the reasons it is not PDF/A
      (a standard 14 font, which is not embedded). Documents that do not
      call `setPDFA` are written exactly as before.
+   * Embedded and associated files (PDF/A-3): `embedAssociatedFile` writes
+     an EmbeddedFile stream (MIME /Subtype, /Params with /Size and optional
+     /CreationDate and /ModDate) and a Filespec (/F, /UF, /AFRelationship,
+     /Desc), listed in the catalog's /AF array and /Names /EmbeddedFiles.
+     `facturXExtension` is the Factur-X / ZUGFeRD XMP schema.
 
 ## 1.8
 
