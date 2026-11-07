@@ -23,6 +23,8 @@ extra-source-files:
   Test/Makefile
   Test/Penrose.hs
   Test/test.hs
+  Test/unicode.hs
+  Test/pdfa.hs
   README.md
   TODO.txt
   changelog.md
@@ -56,7 +58,11 @@ Test-Suite HPDF-Tests
   hs-source-dirs:    Test
   Build-depends:     base >= 4, 
                      HTF >= 0.10,
-                     HPDF
+                     HPDF,
+                     bytestring,
+                     containers,
+                     directory,
+                     text
   build-tool-depends:
     HTF:htfpp
   Default-language:  Haskell2010
@@ -76,6 +82,25 @@ Executable HPDF-Demo
   Default-language:  Haskell2010
   Other-Modules:
     Penrose
+
+Executable HPDF-Unicode-Demo
+  Main-is:           unicode.hs
+  hs-source-dirs:    Test
+  Build-depends:     base >= 4,
+                     HPDF,
+                     text >= 1.2.0,
+                     directory
+  Default-language:  Haskell2010
+
+Executable HPDF-PDFA-Demo
+  Main-is:           pdfa.hs
+  hs-source-dirs:    Test
+  Build-depends:     base >= 4,
+                     HPDF,
+                     bytestring,
+                     text >= 1.2.0,
+                     directory
+  Default-language:  Haskell2010
 
 library
   build-depends: 
@@ -111,6 +136,7 @@ library
      Graphics.PDF.Fonts.FontTypes
      Graphics.PDF.Fonts.StandardFont
      Graphics.PDF.Fonts.Type1
+     Graphics.PDF.Fonts.TrueType
      Graphics.PDF.Typesetting.WritingSystem
      Graphics.PDF.Navigation
      Graphics.PDF.Image
@@ -122,6 +148,7 @@ library
      Graphics.PDF.Expression
      Graphics.PDF.Typesetting
      Graphics.PDF.Documentation
+     Graphics.PDF.Archive
   Other-Modules:
      Graphics.PDF.LowLevel.Types
      Graphics.PDF.Data.PDFTree

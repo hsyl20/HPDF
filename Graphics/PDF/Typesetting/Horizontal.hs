@@ -26,7 +26,8 @@ import Graphics.PDF.Typesetting.Breaking
 import Graphics.PDF.Shapes
 import Graphics.PDF.Draw
 import Graphics.PDF.Coordinates
-import qualified Data.ByteString as S(reverse,cons,singleton)
+import qualified Data.ByteString as S(ByteString,reverse)
+import Graphics.PDF.Fonts.Font(IsFont(..),encodeGlyphs)
 import Data.Maybe(isJust,fromJust)
 import Data.List(foldl')
 import Graphics.PDF.Colors
@@ -40,10 +41,15 @@ import Graphics.PDF.LowLevel.Serializer
 saveCurrentword :: PDFGlyph -> PDFGlyph
 saveCurrentword (PDFGlyph g) = PDFGlyph . S.reverse $ g
 
+-- | One glyph in the style's font, bytes reversed (words are built
+-- backwards and reversed by 'saveCurrentword').
+glyphBytes :: Style s => s -> GlyphCode -> S.ByteString
+glyphBytes s g = let PDFFont f _ = textFont (textStyle s) in S.reverse (encodeGlyphs f [g])
+
 -- WARNING
 -- According to splitText, PDFText to concatenate ARE letters so we can optimize the code
 -- Sentences are created when no word style is present, otherwise we just create words
-createWords :: ComparableStyle s => PDFFloat -- ^ Adjustement ratio
+createWords :: Style s => PDFFloat -- ^ Adjustement ratio
             -> Maybe (s,PDFGlyph, PDFFloat) -- ^ Current word
             -> [Letter s] -- ^ List of letters
             -> [HBox s] -- ^ List of words or sentences
@@ -53,10 +59,10 @@ createWords _ Nothing [] = []
 createWords _ (Just (s,t,w)) [] = [createText s (saveCurrentword t) w]
 
 -- Start of a new word
-createWords r Nothing ((AGlyph s t w):l) = createWords r (Just (s,PDFGlyph (S.singleton (fromIntegral t)),w)) l
+createWords r Nothing ((AGlyph s t w):l) = createWords r (Just (s,PDFGlyph (glyphBytes s t),w)) l
 -- New letter. Same style added to the word. Otherwise we start a new word
-createWords r (Just (s,PDFGlyph t,w)) ((AGlyph s' t' w'):l) | s `isSameStyleAs` s' = createWords r (Just (s,PDFGlyph (S.cons (fromIntegral t') t),w+w')) l
-                                                            | otherwise = (createText s (saveCurrentword $ (PDFGlyph t)) w):createWords r (Just (s',PDFGlyph (S.singleton (fromIntegral t')),w')) l 
+createWords r (Just (s,PDFGlyph t,w)) ((AGlyph s' t' w'):l) | s `isSameStyleAs` s' = createWords r (Just (s,PDFGlyph (glyphBytes s t' <> t),w+w')) l
+                                                            | otherwise = (createText s (saveCurrentword $ (PDFGlyph t)) w):createWords r (Just (s',PDFGlyph (glyphBytes s' t'),w')) l 
                                                              
 -- Glue close the word and start a new one because we want glues of different widths in the PDF
 createWords r (Just (s,t,w)) ((Glue w' y z (Just s')):l) = (createText s (saveCurrentword $ t) w):(HGlue w' (Just(y,z)) (Just s')):createWords r  Nothing l
@@ -280,7 +286,9 @@ drawTheTextBox state style x y t = do
   when (state == StartText || state == OneBlock || state == ContinueText) $ (do
       case t of
           Nothing -> return ()
-          Just myText -> tell $ toPDF myText
+          Just myText -> do
+              recordGlyphs (textFont . textStyle $ style) myText
+              tell $ toPDF myText
     )
   when (state == StopText || state == OneBlock) $ (do
       tell rbracket
@@ -293,10 +301,14 @@ drawTextGlue :: Style style
              -> PDFText ()
 drawTextGlue style w = do              
     let ws = spaceWidth style
-        PDFFont _ size = textFont . textStyle $ style
+        pf@(PDFFont f size) = textFont . textStyle $ style
         delta = w - ws 
-    return ()
-    tell . mconcat $ [ lparen, bspace,rparen,bspace,toPDF ((-delta) * 1000.0 / (fromIntegral size) ), bspace]  
+        -- a space glyph, then the extra displacement
+        spaceGlyphs = fontGlyphs pf [spaceGlyph f]
+        spaceRun | glyphCodeBytes f == 1 = mconcat [lparen, bspace, rparen]
+                 | otherwise = toPDF spaceGlyphs
+    recordGlyphs pf spaceGlyphs
+    tell . mconcat $ [ spaceRun,bspace,toPDF ((-delta) * 1000.0 / (fromIntegral size) ), bspace]  
     
   
 data TextDrawingState = StartText -- ^ Send PDF commands needed to start a text

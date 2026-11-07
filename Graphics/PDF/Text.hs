@@ -39,6 +39,8 @@ module Graphics.PDF.Text(
    , textWidth
    , pdfGlyph
    , glyph
+   , fontGlyphs
+   , recordGlyphs
  ) where
 
 import Graphics.PDF.LowLevel.Types
@@ -46,7 +48,10 @@ import Graphics.PDF.Draw
 import Control.Monad.State
 import Graphics.PDF.Resources
 import Control.Monad.Writer
+import Control.Monad (unless)
 import qualified Data.Set as Set
+import qualified Data.Map.Strict as M
+import qualified Data.IntSet as IS
 import Data.List(foldl')
 import Data.Binary.Builder(Builder)
 import Graphics.PDF.LowLevel.Serializer
@@ -60,9 +65,10 @@ glyphStreamWidth :: PDFFont
                  -> PDFGlyph 
                  -> PDFFloat
 glyphStreamWidth (PDFFont f s) (PDFGlyph t) = 
- let w = foldl' (\a b -> a + glyphWidth f s (fromIntegral b)) 0 . S.unpack $ t
+ let gs = decodeGlyphs f t
+     w = foldl' (\a b -> a + glyphWidth f s b) 0 gs
  in
-  w + (foldl' (\a (x,y) -> a + getKern f s x y) 0 $ [(GlyphCode ca,GlyphCode cb) | (ca,cb) <- S.zip t (S.tail t)])
+  w + (foldl' (\a (x,y) -> a + getKern f s x y) 0 $ zip gs (drop 1 gs))
 
 textWidth :: PDFFont -> T.Text -> PDFFloat
 textWidth f t = glyphStreamWidth f . pdfGlyph f $ t
@@ -70,7 +76,12 @@ textWidth f t = glyphStreamWidth f . pdfGlyph f $ t
 pdfGlyph :: PDFFont
          -> T.Text 
          -> PDFGlyph 
-pdfGlyph (PDFFont f _) t = PDFGlyph . S.pack . map (fromIntegral . charGlyph f) . T.unpack $ t 
+pdfGlyph (PDFFont f _) t = PDFGlyph . encodeGlyphs f . map (charGlyph f) . T.unpack $ t 
+
+-- | Glyph codes as a glyph run for this font (one or two bytes per glyph,
+-- see 'glyphCodeBytes').
+fontGlyphs :: PDFFont -> [GlyphCode] -> PDFGlyph
+fontGlyphs (PDFFont f _) = PDFGlyph . encodeGlyphs f
 
 
 type FontState = (Set.Set AnyFont)
@@ -82,9 +93,10 @@ data TextParameter = TextParameter { tc :: !PDFFloat
                                    , ts :: !PDFFloat
                                    , fontState :: FontState
                                    , currentFont :: Maybe PDFFont
+                                   , glyphsShown :: M.Map String IS.IntSet
                                    }
 defaultParameters ::  TextParameter
-defaultParameters = TextParameter 0 0 100 0 0 (Set.empty) Nothing
+defaultParameters = TextParameter 0 0 100 0 0 (Set.empty) Nothing M.empty
 
      
 -- | The text monad 
@@ -132,6 +144,8 @@ drawText :: PDFText a
 drawText t = do
     let ((a,w),s) = (runState . runWriterT . unText $ t) defaultParameters
     mapM_ addFontRsrc (Set.elems (fontState s))
+    unless (M.null (glyphsShown s)) $ modifyStrict $ \st ->
+       st { usedGlyphs = M.unionWith IS.union (glyphsShown s) (usedGlyphs st) }
     tell . serialize $ "\nBT"
     tell w
     tell . serialize $ "\nET"
@@ -153,13 +167,29 @@ textStart x y = tell . mconcat  $ [ serialize '\n'
  --writeCmd $ "\n" ++ (show x) ++ " " ++ (show y) ++ " Td"         
 
 
+ -- | One glyph of a simple (one byte per glyph) font. For a CID-keyed font
+ -- use 'fontGlyphs'.
 glyph :: GlyphCode -> PDFGlyph 
 glyph c = PDFGlyph . S.singleton $ (fromIntegral c)
+
+-- | Notes that a glyph run is shown with a font, so that a subset font
+-- ('Graphics.PDF.Fonts.TrueType') embeds those glyphs. 'displayGlyphs',
+-- 'displayText', 'text' and the typesetting code call it; code that writes
+-- a glyph run to the stream by other means must call it too. A no-op for
+-- simple (one byte per glyph) fonts.
+recordGlyphs :: PDFFont -> PDFGlyph -> PDFText ()
+recordGlyphs (PDFFont f _) (PDFGlyph t)
+  | glyphCodeBytes f == 1 = return ()
+  | otherwise = PDFText . lift . modifyStrict $ \s ->
+      s { glyphsShown = M.insertWith IS.union (name f) gs (glyphsShown s) }
+  where
+    gs = IS.fromList [fromIntegral g | g <- decodeGlyphs f t]
 
 -- | Display glyphs
 displayGlyphs :: PDFGlyph
               -> PDFText ()
 displayGlyphs t = do
+    gets currentFont >>= mapM_ (\f -> recordGlyphs f t)
     tell $ serialize ' '
     tell . toPDF $ t
     tell . serialize $ " Tj"

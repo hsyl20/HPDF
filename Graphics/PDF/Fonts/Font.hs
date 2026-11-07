@@ -27,6 +27,8 @@ module Graphics.PDF.Fonts.Font(
     , fontSize
     , trueSize
     , readFontData
+    , encodeGlyphs
+    , decodeGlyphs
 ) where 
 
 import Graphics.PDF.LowLevel.Types
@@ -34,6 +36,7 @@ import Graphics.PDF.Resources
 import qualified Data.Map.Strict as M
 import qualified Data.ByteString as B
 import Graphics.PDF.Fonts.FontTypes
+import Data.Bits (shiftL, shiftR, (.|.))
 
 emptyFontStructure :: FontStructure
 emptyFontStructure = FS { baseFont = ""
@@ -80,6 +83,14 @@ class IsFont f where
     hyphenGlyph :: f -> Maybe GlyphCode
     spaceGlyph :: f -> GlyphCode
     charGlyph :: f -> Char  -> GlyphCode 
+    {-
+    Glyph encoding in content streams
+    -}
+    -- | Number of bytes a glyph code takes in a text string shown with this
+    -- font: 1 for simple fonts (the default), 2 for CID-keyed fonts using
+    -- the Identity-H encoding.
+    glyphCodeBytes :: f -> Int
+    glyphCodeBytes _ = 1
 
 data AnyFont = forall f. (IsFont f,PdfResourceObject f,Show f) => AnyFont f
 
@@ -103,6 +114,7 @@ instance IsFont AnyFont where
     hyphenGlyph (AnyFont f) = hyphenGlyph f
     spaceGlyph (AnyFont f) = spaceGlyph f
     charGlyph (AnyFont f) = charGlyph f
+    glyphCodeBytes (AnyFont f) = glyphCodeBytes f
 
 instance Eq AnyFont where 
     a == b = name a == name b
@@ -134,3 +146,21 @@ readFontData f = do
 
 
 
+
+-- | Bytes of a glyph run for a text string shown with this font: one byte
+-- per glyph for simple fonts, two bytes (big endian) for CID-keyed fonts.
+encodeGlyphs :: IsFont f => f -> [GlyphCode] -> B.ByteString
+encodeGlyphs f gs
+  | glyphCodeBytes f == 2 = B.pack (concatMap two gs)
+  | otherwise = B.pack (map fromIntegral gs)
+  where
+    two (GlyphCode c) = [fromIntegral (c `shiftR` 8), fromIntegral c]
+
+-- | Glyph codes of a text string written by 'encodeGlyphs'.
+decodeGlyphs :: IsFont f => f -> B.ByteString -> [GlyphCode]
+decodeGlyphs f bs
+  | glyphCodeBytes f == 2 = pairs (B.unpack bs)
+  | otherwise = map fromIntegral (B.unpack bs)
+  where
+    pairs (h:l:r) = GlyphCode ((fromIntegral h `shiftL` 8) .|. fromIntegral l) : pairs r
+    pairs _ = []

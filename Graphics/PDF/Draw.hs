@@ -53,6 +53,10 @@ module Graphics.PDF.Draw(
  , PDFDocumentPageLayout(..)
  , PDFViewerPreferences(..)
  , PDFDocumentInfo(..)
+ -- ** PDF/A
+ , PDFA(..)
+ , XMPExtension(..)
+ , XMPProperty(..)
  -- ** Page transitions
  , PDFTransition(..)
  , PDFTransStyle(..)
@@ -111,6 +115,7 @@ import Data.Monoid
 
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import qualified Data.Binary.Builder as BU
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
@@ -180,6 +185,7 @@ data DrawState = DrawState {
                 ,  shadings :: M.Map PDFShading String
                 ,  softMasks :: M.Map SoftMask String
                 ,  matrix :: [Matrix]
+                ,  usedGlyphs :: M.Map String IS.IntSet -- ^ Glyph ids shown with each subset font, by font name
                 }
 data DrawEnvironment = DrawEnvironment {
                         streamId :: Int
@@ -297,7 +303,7 @@ supplyName = do
 emptyDrawState :: Int -> DrawState
 emptyDrawState ref = 
     let names = (map (("O" ++ (show ref)) ++ ) $ [replicate k ['a'..'z'] | k <- [1..]] >>= sequence) in
-    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity]
+    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty
   
 -- | Execute the drawing commands to get a new state and an uncompressed PDF stream
 runDrawing :: Draw a -> DrawEnvironment -> DrawState -> (a,DrawState,BU.Builder)
@@ -440,6 +446,7 @@ data PDFCatalog = PDFCatalog
                    !PDFDocumentPageMode
                    !PDFDocumentPageLayout
                    !PDFViewerPreferences
+                   ![(PDFName, AnyPdfObject)] -- Other entries (Metadata, OutputIntents, AF, Names)
 
 -- | The PDF state
 data PdfState = PdfState { supplySrc :: !Int -- ^ Supply of unique identifiers
@@ -453,6 +460,10 @@ data PdfState = PdfState { supplySrc :: !Int -- ^ Supply of unique identifiers
                          , currentPage :: Maybe (PDFReference PDFPage) -- ^ Reference to the current page used to create outlines
                          , xobjectBound :: !(IM.IntMap (PDFFloat,PDFFloat)) -- ^ Width and height of xobjects
                          , firstOutline :: [Bool] -- ^ Used to improve the outline API
+                         , fontFinalizers :: [M.Map String IS.IntSet -> PDF ()] -- ^ Run when the document is saved, with the glyph ids every stream used per font name (font subsetting)
+                         , pdfaSettings :: Maybe PDFA -- ^ Write the document as PDF/A (see "Graphics.PDF.Archive")
+                         , associatedFiles :: [(T.Text, PDFReference PDFDictionary)] -- ^ Embedded files (file specifications) by name, most recent first
+                         , documentProblems :: [String] -- ^ Why the document does not conform to what was asked of it (PDF/A), found when it is saved
                          }
                          
 -- | A PDF Page object
@@ -543,6 +554,35 @@ data PDFDocumentInfo = PDFDocumentInfo {
                    , compressed :: Bool
                    }
 
+
+-- | What a PDF/A document declares and embeds besides its pages. Set it
+-- with 'Graphics.PDF.Archive.setPDFA'.
+data PDFA = PDFA {
+    pdfaPart :: !Int -- ^ PDF/A part (2 or 3)
+  , pdfaConformance :: !String -- ^ conformance level (@B@)
+  , pdfaTitle :: !T.Text -- ^ document title (Info @/Title@ and @dc:title@); empty for none
+  , pdfaOutputProfile :: !B.ByteString -- ^ the ICC profile of the output intent (an RGB profile such as sRGB)
+  , pdfaOutputCondition :: !T.Text -- ^ its @OutputConditionIdentifier@, e.g. @sRGB IEC61966-2.1@
+  , pdfaExtensions :: [XMPExtension] -- ^ XMP properties outside the predefined schemas, with their PDF/A extension schema description
+  }
+
+-- | An XMP schema outside the ones PDF/A predefines: its properties are
+-- written in the metadata, and described in a PDF/A extension schema.
+data XMPExtension = XMPExtension {
+    xmpSchemaName :: !T.Text -- ^ human-readable name of the schema
+  , xmpNamespace :: !T.Text -- ^ namespace URI
+  , xmpPrefix :: !T.Text -- ^ preferred prefix
+  , xmpProperties :: [XMPProperty]
+  }
+
+-- | One simple (text-valued) property of an 'XMPExtension'.
+data XMPProperty = XMPProperty {
+    xmpPropName :: !T.Text
+  , xmpPropValueType :: !T.Text -- ^ e.g. @Text@
+  , xmpPropCategory :: !T.Text -- ^ @external@ or @internal@
+  , xmpPropDescription :: !T.Text
+  , xmpPropValue :: !T.Text
+  }
 
 -- | Document page mode
 data PDFDocumentPageMode = UseNone
@@ -692,13 +732,14 @@ instance PdfLengthInfo PDFPage where
 -- Main objects in a PDF document
 
 instance PdfObject PDFCatalog where
- toPDF (PDFCatalog outlines lPages pgMode pgLayout viewerPrefs) = toPDF $ dictFromList $
+ toPDF (PDFCatalog outlines lPages pgMode pgLayout viewerPrefs extra) = toPDF $ dictFromList $
    [ entry "Type" (PDFName "Catalog")
    , entry "Pages" lPages
    , entry "PageMode" (PDFName . show $ pgMode)
    , entry "PageLayout" (PDFName . show $ pgLayout)
    , entry "ViewerPreferences" viewerPrefs
    ] ++ (maybe [] (\x -> [entry "Outlines" x]) outlines)
+   ++ extra
 
 instance PdfLengthInfo PDFCatalog where
 

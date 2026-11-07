@@ -24,6 +24,7 @@ module Graphics.PDF
     PDF 
   , runPdf
   , pdfByteString
+  , pdfByteStringE
   -- ** PDF Common Types
   , PDFRect(..)
   , PDFFloat
@@ -71,6 +72,7 @@ module Graphics.PDF
   , module Graphics.PDF.Fonts.Font 
   , module Graphics.PDF.Fonts.StandardFont
   , module Graphics.PDF.Fonts.Type1
+  , module Graphics.PDF.Fonts.TrueType
   , readType1Font
   , readType1FontWithEncoding
   , mkType1Font
@@ -92,6 +94,8 @@ import Graphics.PDF.Pattern
 import Graphics.PDF.Navigation
 import Graphics.PDF.Text
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
+import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Lazy as B
 import Data.Int
 import Text.Printf(printf)
@@ -108,6 +112,7 @@ import Codec.Compression.Zlib
 import Graphics.PDF.Action
 import Graphics.PDF.Image
 import Graphics.PDF.Resources(emptyResource)
+import qualified Graphics.PDF.Resources as R
 import Data.Binary.Builder(Builder,fromLazyByteString, toLazyByteString)
 import Graphics.PDF.LowLevel.Serializer
 import Data.List(mapAccumL)
@@ -116,7 +121,15 @@ import qualified Data.Text as T
 import Graphics.PDF.Fonts.Font 
 import Graphics.PDF.Fonts.StandardFont
 import Graphics.PDF.Fonts.Type1
+import Graphics.PDF.Fonts.TrueType
 import Graphics.PDF.Fonts.Encoding (unionEncodings, Encodings(..), PostscriptName)
+import Graphics.PDF.Archive
+import Data.Bits (xor)
+import Data.Word (Word64, Word8)
+import Data.List (sortOn)
+import qualified Data.ByteString as S
+import Control.Monad.Writer (tell)
+import qualified Data.ByteString.Lazy.Char8 as LC
 
 -- | Create a new PDF document and return a first page
 -- The page is using the document size by default
@@ -133,8 +146,14 @@ createStreams :: PDF ()
 createStreams = do
     ls <- gets streams >>= return . IM.toList
     modifyStrict $ \s -> s {streams = IM.empty}
-    mapM_ addStream ls
+    pdfa <- gets pdfaSettings
+    mapM_ (addStream . maybe id (const noInterpolation) pdfa) ls
  where
+    -- PDF/A forbids image interpolation (ISO 19005-2, 6.2.8)
+    noInterpolation (k,(p,(st,w)))
+      | pdfDictMember (PDFName "Interpolate") (otherRsrcs st) =
+          (k,(p,(st {otherRsrcs = insertInPdfDict (PDFName "Interpolate") (AnyPdfObject False) (otherRsrcs st)},w)))
+      | otherwise = (k,(p,(st,w)))
     addStream (k,(p,(state',w'))) = do
      -- New reference for the stream
      r <- supply
@@ -184,9 +203,38 @@ createStreams = do
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length . toLazyByteString $ w'))
 
--- | Save all the pages and streams in the main object dictionary
-saveObjects :: PDF (PDFReference PDFCatalog)
+-- | Run the font finalizers with the glyph ids each font showed in any
+-- stream. A finalizer may add streams of its own (font programs, CMaps),
+-- which 'createStreams' then writes like any other.
+finalizeFonts :: PDF ()
+finalizeFonts = do
+  fs <- gets fontFinalizers
+  used <- gets (M.unionsWith IS.union . map (usedGlyphs . fst . snd) . IM.elems . streams)
+  modifyStrict $ \s -> s {fontFinalizers = []}
+  mapM_ ($ used) (reverse fs)
+
+-- | Save all the pages and streams in the main object dictionary. Returns
+-- the catalog and the Info dictionary.
+saveObjects :: PDF (PDFReference PDFCatalog, Maybe (PDFReference PDFDictionary))
 saveObjects  = do
+  -- Write the fonts that wait for the glyphs the document used (subsets)
+  finalizeFonts
+  pdfa <- gets pdfaSettings
+  -- PDF/A: the fonts must be embedded, so none of the standard 14
+  mapM_ (const checkEmbeddedFonts) pdfa
+  -- The output intent's ICC profile is a stream like the others
+  intents <- case pdfa of
+    Nothing -> return []
+    Just a -> do
+      icc <- createContent (iccStream a) Nothing
+      intent <- addObject . dictFromList $
+        [ entry "Type" (PDFName "OutputIntent")
+        , entry "S" (PDFName "GTS_PDFA1")
+        , entry "OutputConditionIdentifier" (pdfTextString (pdfaOutputCondition a))
+        , entry "Info" (pdfTextString (pdfaOutputCondition a))
+        , entry "DestOutputProfile" icc
+        ]
+      return [entry "OutputIntents" [intent]]
   -- Save streams to the object dictionary so that they are saved in the PDF document
   createStreams
   infos <- gets docInfo
@@ -195,23 +243,74 @@ saveObjects  = do
   -- Create outlines object
   o <- gets outline
   oref <- addOutlines o
+  -- XMP metadata: never compressed (PDF/A)
+  metadata <- case pdfa of
+    Nothing -> return []
+    Just a -> do
+      let xmp = xmpPacket a infos producerName
+      r <- addObject $ PDFStream (fromLazyByteString xmp) False (Right (PDFLength (B.length xmp)))
+             (dictFromList [entry "Type" (PDFName "Metadata"), entry "Subtype" (PDFName "XML")])
+      return [entry "Metadata" r]
+  -- Associated (embedded) files
+  files <- gets (sortOn fst . reverse . associatedFiles)
+  let fileEntries
+        | null files = []
+        | otherwise =
+            [ entry "AF" (map snd files)
+            , entry "Names" (dictFromList [entry "EmbeddedFiles" (dictFromList
+                [entry "Names" (concat [[pdfTextString n, AnyPdfObject r] | (n, r) <- files])])])
+            ]
+  -- PDF/A: an indirect Info dictionary that agrees with the metadata
+  -- (other documents keep theirs in the trailer, as before)
+  info <- case pdfa of
+    Nothing -> return Nothing
+    Just a -> fmap Just . addObject . dictFromList $
+         [ entry "Title" (pdfTextString (pdfaTitle a)) | not (T.null (pdfaTitle a)) ]
+      ++ [ entry "Author" (pdfTextString (author infos)) | not (T.null (author infos)) ]
+      ++ [ entry "Subject" (pdfTextString (subject infos)) | not (T.null (subject infos)) ]
+      ++ [ entry "Producer" (pdfTextString producerName) ]
   -- Create the catalog
   cat <- addObject $ PDFCatalog oref pRef (pageMode infos) (pageLayout infos) (viewerPreferences infos)
+           (metadata ++ intents ++ fileEntries)
   modifyStrict $ \s -> s {catalog = cat}
-  gets catalog
+  return (cat, info)
+ where
+  iccStream a = do
+    modifyStrict $ \s -> s {otherRsrcs = dictFromList [entry "N" (PDFInteger 3)]}
+    tell (fromLazyByteString (pdfaOutputProfile a))
+
+-- | Records a problem for each standard 14 font a stream uses: they are
+-- not embedded, so the document cannot be PDF/A.
+checkEmbeddedFonts :: PDF ()
+checkEmbeddedFonts = do
+  ss <- gets (IM.elems . streams)
+  let used = M.keys (M.unions [ fs | (_, (st, _)) <- ss
+                                    , Just (PDFDictionary fs) <- [M.lookup (PDFName "Font") (R.resources (rsrc st))] ])
+      bad = [ n | PDFName n <- used, n `elem` map show [Helvetica ..] ]
+  modifyStrict $ \s -> s {documentProblems = documentProblems s ++
+    [ "PDF/A: the standard font " ++ n ++ " is not embedded; use an embedded (TrueType) font" | n <- bad ]}
+
+producerName :: T.Text
+producerName = T.pack "HPDF - The Haskell PDF Library"
 
 -- | The PDFTrailer
 #ifndef __HADDOCK__
 data PDFTrailer = PDFTrailer 
   !Int -- Number of PDF objects in the document
   !(PDFReference PDFCatalog) -- Reference to the PDf catalog
-  !(PDFDocumentInfo)
+  !TrailerInfo
 #else
 data PDFTrailer
 #endif
+
+-- | The trailer's document information: the Info dictionary written inline,
+-- or (PDF/A) a reference to an indirect Info dictionary and the document
+-- identifier.
+data TrailerInfo = InlineInfo PDFDocumentInfo
+                 | ArchiveInfo (PDFReference PDFDictionary) S.ByteString
     
 instance PdfObject PDFTrailer where
-   toPDF (PDFTrailer size root infos) = toPDF $ dictFromList $
+   toPDF (PDFTrailer size root (InlineInfo infos)) = toPDF $ dictFromList $
      [ entry "Size" (PDFInteger $ size)
      , entry "Root" root
      , entry "Info" (dictFromList $ allInfos)
@@ -219,10 +318,34 @@ instance PdfObject PDFTrailer where
      where
       allInfos = [ entry "Author" (toPDFString . author $ infos)
                  , entry "Subject" (toPDFString . subject $ infos)
-                 , entry "Producer" (toPDFString (T.pack "HPDF - The Haskell PDF Library" ))
+                 , entry "Producer" (toPDFString producerName)
                  ]
+   toPDF (PDFTrailer size root (ArchiveInfo info docId)) = toPDF $ dictFromList $
+     [ entry "Size" (PDFInteger $ size)
+     , entry "Root" root
+     , entry "Info" info
+     , entry "ID" [HexString docId, HexString docId]
+     ]
 
 instance PdfLengthInfo PDFTrailer where
+
+-- | A byte string written in hexadecimal
+newtype HexString = HexString S.ByteString
+
+instance PdfObject HexString where
+  toPDF (HexString b) = serialize ("<" ++ concatMap (printf "%02X") (S.unpack b) ++ ">")
+
+instance PdfLengthInfo HexString where
+
+-- | 16 bytes from the document's objects (two FNV-1a 64 hashes), for the
+-- trailer @/ID@: the same document gets the same identifier.
+documentId :: B.ByteString -> S.ByteString
+documentId bytes = S.pack (word64Bytes (fnv 14695981039346656037) ++ word64Bytes (fnv 0x84222325cbf29ce4))
+ where
+  fnv :: Word64 -> Word64
+  fnv h0 = B.foldl' (\h w -> (h `xor` fromIntegral w) * 1099511628211) h0 bytes
+  word64Bytes :: Word64 -> [Word8]
+  word64Bytes w = [ fromIntegral (w `div` (256 ^ k)) | k <- [7, 6 .. 0 :: Int] ]
 
 -- | Write PDF objects in the TOC
 writeObjectsAndCreateToc :: [Builder] -- ^ List of objects each object being already converted to a bytestring
@@ -235,7 +358,7 @@ writeObjectsAndCreateToc l =
    (length l,last lengths,entries)
 -- foldr writeObject (0,0::Int64,[]) l where
 -- writeObject obj (nb,len,toc) = (nb+1,len + (B.length . toLazyByteString $ obj),(serialize $ (printf "%010d 00000 n \n" ((fromIntegral len)::Integer))) : toc)
-generateStreams :: PDFReference PDFCatalog -> PDFDocumentInfo -> Int -> Int64 -> [Builder]
+generateStreams :: PDFReference PDFCatalog -> TrailerInfo -> Int -> Int64 -> [Builder]
                 -> [Builder] -> B.ByteString
 generateStreams root di !nb !totalLen ens [] = 
   let entries = reverse (tail ens)  
@@ -275,13 +398,24 @@ defaultPdfSettings =
            , currentPage = Nothing
            , xobjectBound = IM.empty
            , firstOutline = [True]
+           , fontFinalizers = []
+           , pdfaSettings = Nothing
+           , associatedFiles = []
+           , documentProblems = []
            }
 
 createObjectByteStrings :: PdfState -> PDF a -> B.ByteString 
-createObjectByteStrings pdfState m =
-      let header = serialize "%PDF-1.5\n"
-          objectEncoding (x,a) = toPDF . PDFReferencedObject (fromIntegral $! x) $ a
-          (root,s) = flip runState pdfState  . unPDF $ createPDF >> m >> saveObjects
+createObjectByteStrings pdfState m = snd (createDocument pdfState m)
+
+-- | The problems found while saving the document, and the document.
+createDocument :: PdfState -> PDF a -> ([String], B.ByteString)
+createDocument pdfState m =
+      let objectEncoding (x,a) = toPDF . PDFReferencedObject (fromIntegral $! x) $ a
+          ((root, info),s) = flip runState pdfState  . unPDF $ createPDF >> m >> saveObjects
+          header = case pdfaSettings s of
+            -- PDF/A: a comment line of four bytes above 127 after the header
+            Just _ -> fromLazyByteString (LC.pack "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n")
+            Nothing -> serialize "%PDF-1.5\n"
           objs = objects s
           encodeAnObject im k =
             let Just o = IM.lookup k im
@@ -293,8 +427,11 @@ createObjectByteStrings pdfState m =
           encodedObjects = snd $ mapAccumL encodeAnObject objs (IM.keys objs)
           objectContents = header : encodedObjects
           (_nb, _len, _toc) = writeObjectsAndCreateToc objectContents
+          trailerInfo = case info of
+            Nothing -> InlineInfo (docInfo pdfState)
+            Just i -> ArchiveInfo i (documentId (toLazyByteString (mconcat encodedObjects)))
       in
-      generateStreams root (docInfo pdfState) 0 0 [] objectContents 
+      (documentProblems s, generateStreams root trailerInfo 0 0 [] objectContents)
 
         --mconcat$ objectContents ++
         --        [ serialize "xref\n"
@@ -317,6 +454,17 @@ pdfByteString :: PDFDocumentInfo
               -> PDF a  -- ^ PDF action 
               -> B.ByteString
 pdfByteString infos rect m = createObjectByteStrings (defaultPdfSettings {defaultRect = rect, docInfo = infos} ) m
+
+-- | Like 'pdfByteString', or the reasons the document is not what it was
+-- asked to be (a PDF/A document using a font that is not embedded).
+pdfByteStringE :: PDFDocumentInfo
+               -> PDFRect -- ^ Default size for a page
+               -> PDF a  -- ^ PDF action
+               -> Either [String] B.ByteString
+pdfByteStringE infos rect m =
+  case createDocument (defaultPdfSettings {defaultRect = rect, docInfo = infos}) m of
+    ([], bytes) -> Right bytes
+    (problems, _) -> Left problems
 
 -- | Generates a PDF document
 runPdf :: String -- ^ Name of the PDF document
