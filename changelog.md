@@ -19,6 +19,16 @@
      EmbedWhole` embeds the whole font. Glyphs reach the subset through
      `recordGlyphs`, which `displayGlyphs`, `displayText`, `text` and the
      typesetting code call.
+   * PDF/A-3b output, `Graphics.PDF.Archive`: `setPDFA (pdfa3b icc)` writes,
+     when the document is saved, an uncompressed XMP metadata stream
+     (pdfaid, Dublin Core title/creator/description, pdf:Producer, and any
+     `XMPExtension` with its PDF/A extension schema description), an
+     OutputIntent with the given ICC profile, an indirect Info dictionary, a
+     trailer /ID (a hash of the objects, so output stays deterministic), a
+     PDF 1.7 header with a binary comment line, and no image interpolation.
+     `pdfByteStringE` returns the document or the reasons it is not PDF/A
+     (a standard 14 font, which is not embedded). Documents that do not
+     call `setPDFA` are written exactly as before.
 
 ## 1.8
 

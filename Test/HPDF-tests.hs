@@ -7,6 +7,7 @@ import Data.Either (isRight)
 
 import Graphics.PDF.Image(JpegFile, readJpegDataURL, jpegBounds)
 import Graphics.PDF
+import Graphics.PDF.Archive
 import Graphics.PDF.Fonts.TrueType
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
@@ -169,3 +170,67 @@ test_subsetFontTypeset = withTestFont $ \_ d -> do
       bfchars = [ l | l <- C.lines pdf, C.isPrefixOf (C.pack "<") l, C.count '<' l == 2, C.length l <= 20 ]
       mapped c = C.pack (printf "<%04X> <%04X>" (glyphOf d c) (ord c)) `elem` bfchars
   assertBool (all mapped ("Съешьжеёхфиз ,." :: String))
+
+-- PDF/A and associated files --------------------------------------------
+
+-- | A stand-in for an ICC profile: the tests read the PDF structure, not
+-- the profile.
+fakeIcc :: BL.ByteString
+fakeIcc = BL.fromStrict (C.pack "not really an ICC profile")
+
+exampleExtension :: XMPExtension
+exampleExtension = XMPExtension (T.pack "Example schema") (T.pack "http://example.org/ns/") (T.pack "ex")
+  [XMPProperty (T.pack "Level") (T.pack "Text") (T.pack "external") (T.pack "A level") (T.pack "BASIC")]
+
+pdfaDoc :: AnyFont -> PDF ()
+pdfaDoc font = do
+  setPDFA (pdfa3b fakeIcc) { pdfaTitle = T.pack "Facture 42"
+                           , pdfaExtensions = [exampleExtension] }
+  img <- createPDFRawImageFromByteString 1 1 True NoFilter (BL.pack [255, 0, 0])
+  page <- addPage Nothing
+  drawWithPage page $ do
+    drawText $ text (PDFFont font 12) 10 100 (T.pack "Ça déçoit.")
+    drawXObject img
+
+test_pdfaStructure :: IO ()
+test_pdfaStructure = withTestFont $ \_ d -> do
+  let info = standardDocInfo {compressed = False, author = T.pack "Salmon"}
+      Right pdf = fmap BL.toStrict . pdfByteStringE info (PDFRect 0 0 300 200) $
+        mkTrueTypeFont d >>= pdfaDoc
+      has s = assertBool' s (C.pack s `B.isInfixOf` pdf)
+      assertBool' s b = if b then return () else assertFailure ("missing: " ++ s)
+  -- header with a binary comment
+  assertBool (C.pack "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n" `B.isPrefixOf` pdf)
+  mapM_ has
+    [ "/Type /Metadata", "/Subtype /XML", "<pdfaid:part>3</pdfaid:part>"
+    , "<pdfaid:conformance>B</pdfaid:conformance>"
+    , "<ex:Level>BASIC</ex:Level>", "<pdfaSchema:prefix>ex</pdfaSchema:prefix>"
+    , "<dc:creator><rdf:Seq><rdf:li>Salmon</rdf:li></rdf:Seq></dc:creator>"
+    , "/S /GTS_PDFA1", "/OutputIntents", "/DestOutputProfile"
+    , "/Title (Facture 42)", "/Author (Salmon)", "/ID [<", "/Interpolate false" ]
+  assertBool (not (C.pack "/Interpolate true" `B.isInfixOf` pdf))
+  -- the metadata stream is not compressed
+  assertBool (not (C.pack "/Filter" `B.isInfixOf` C.takeWhile (/= 's') (snd (B.breakSubstring (C.pack "/Subtype /XML") pdf))))
+
+test_pdfaDeterministic :: IO ()
+test_pdfaDeterministic = withTestFont $ \_ d -> do
+  let render = pdfByteStringE standardDocInfo (PDFRect 0 0 300 200) (mkTrueTypeFont d >>= pdfaDoc)
+  assertEqual (render) (render)
+  assertBool (isRight render)
+
+test_pdfaRefusesStandardFonts :: IO ()
+test_pdfaRefusesStandardFonts = do
+  Right helvetica <- mkStdFont Helvetica
+  case pdfByteStringE standardDocInfo (PDFRect 0 0 300 200) (pdfaDoc helvetica) of
+    Left [problem] -> assertBool ("Helvetica" `elem` words problem)
+    other -> assertFailure ("expected one problem, got " ++ either show (const "a document") other)
+
+-- A document that does not ask for PDF/A is written as before: PDF 1.5,
+-- the Info dictionary in the trailer, no /ID.
+test_plainDocumentUnchanged :: IO ()
+test_plainDocumentUnchanged = do
+  let pdf = BL.toStrict $ pdfByteString standardDocInfo (PDFRect 0 0 300 200) (addPage Nothing >> return ())
+  assertBool (C.pack "%PDF-1.5\n" `B.isPrefixOf` pdf)
+  assertBool (C.pack "/Info <<" `B.isInfixOf` pdf)
+  assertBool (not (C.pack "/ID [" `B.isInfixOf` pdf))
+  assertBool (not (C.pack "/Metadata" `B.isInfixOf` pdf))
