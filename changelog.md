@@ -34,6 +34,8 @@
      /CreationDate and /ModDate) and a Filespec (/F, /UF, /AFRelationship,
      /Desc), listed in the catalog's /AF array and /Names /EmbeddedFiles.
      `facturXExtension` is the Factur-X / ZUGFeRD XMP schema.
+   * New examples: `HPDF-Unicode-Demo` (Test/unicode.hs) and
+     `HPDF-PDFA-Demo` (Test/pdfa.hs).
 
 ## 1.8
 
