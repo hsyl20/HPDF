@@ -127,6 +127,7 @@ library
      Graphics.PDF.Expression
      Graphics.PDF.Typesetting
      Graphics.PDF.Documentation
+     Graphics.PDF.Archive
   Other-Modules:
      Graphics.PDF.LowLevel.Types
      Graphics.PDF.Data.PDFTree
