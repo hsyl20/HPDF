@@ -322,8 +322,8 @@ jpegBounds (JpegFile _ w h _ _) = (w,h)
 
 -- | Use an abstract description of a Jpeg to return a PDFReference that can be used to manipulate the Jpeg in the context
 -- of the PDF document
-createPDFJpeg :: JpegFile  
-              -> PDF (PDFReference PDFJpeg)
+createPDFJpeg :: Monad m => JpegFile  
+              -> PDFT m (PDFReference PDFJpeg)
 createPDFJpeg (JpegFile bits_per_component width height color_space img) = do
         PDFReference s <- createContent a' Nothing  
         recordBound s (fromIntegral width) (fromIntegral height)
@@ -349,12 +349,12 @@ createPDFJpeg (JpegFile bits_per_component width height color_space img) = do
                                              }
                     tell img        
         
-createPDFRawImageFromByteString :: Int -- ^ Width
+createPDFRawImageFromByteString :: Monad m => Int -- ^ Width
                                 -> Int -- ^ Height
                                 -> Bool -- ^ Interpolation
                                 -> PDFFilter -- ^ Decompression filter to be sued by the PDF reader to render the picture
                                 -> B.ByteString -- ^ RGB pixels
-                                -> PDF (PDFReference RawImage)  
+                                -> PDFT m (PDFReference RawImage)  
 createPDFRawImageFromByteString width height interpolate pdfFilter stream =  do
         PDFReference s <- createContent a' Nothing  
         recordBound s (fromIntegral width) (fromIntegral height)
@@ -383,11 +383,11 @@ createPDFRawImageFromByteString width height interpolate pdfFilter stream =  do
                                              }
                 tell . fromLazyByteString $ stream
 
-createPDFRawImageFromARGB :: Int -- ^ Width
+createPDFRawImageFromARGB :: Monad m => Int -- ^ Width
                           -> Int -- ^ Height
                           -> Bool -- ^ Interpolation
                           -> U.Vector Word32 -- ^ ARGB pixels (A component not used y the PDF document)
-                          -> PDF (PDFReference RawImage)  
+                          -> PDFT m (PDFReference RawImage)  
 createPDFRawImageFromARGB width height interpolate stream =  do
         PDFReference s <- createContent a' Nothing  
         recordBound s (fromIntegral width) (fromIntegral height)

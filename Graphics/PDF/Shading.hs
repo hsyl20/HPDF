@@ -36,9 +36,9 @@ import Control.Monad.Writer
 type ExprFloat = PDFExpression PDFFloat
 
 createFunction1Object ::
-    (ColorTuple a, Expr.Result e) =>
+    (ColorTuple a, Expr.Result e, Monad m) =>
     Function1 Global a e ->
-    PDF (FunctionObject (PDFFloat -> a) (ExprFloat -> e))
+    PDFT m (FunctionObject (PDFFloat -> a) (ExprFloat -> e))
 createFunction1Object func =
     let domain = domain1Dict func in
     case func of
@@ -56,9 +56,9 @@ createFunction1Object func =
             Draw.rsrcFromSampled domain (\bnds -> [Array.rangeSize bnds]) arr
 
 createFunction2Object ::
-    (ColorTuple a, Expr.Result e) =>
+    (ColorTuple a, Expr.Result e, Monad m) =>
     Function2 Global a e ->
-    PDF (FunctionObject
+    PDFT m (FunctionObject
             (PDFFloat -> PDFFloat -> a) (ExprFloat -> ExprFloat -> e))
 createFunction2Object func =
     let domain = domain2Dict func in

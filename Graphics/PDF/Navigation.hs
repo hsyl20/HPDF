@@ -32,43 +32,43 @@ isFirst :: [Bool] -> Bool
 isFirst r = head r
   
 -- | Start a new outline level  
-startNew :: PDF ()
+startNew :: Monad m => PDFT m ()
 startNew = modifyStrict $ \s -> s{firstOutline = True:(firstOutline s)}
 
 -- | We remember there are outlines at this level
-addedOutline :: PDF ()
+addedOutline :: Monad m => PDFT m ()
 addedOutline = modifyStrict $ \s -> s{firstOutline = False:tail (firstOutline s)}
 
 -- | Close an outline level
-closeNew :: PDF()
+closeNew :: Monad m => PDFT m ()
 closeNew = do
     r <- gets firstOutline
     when (not (isFirst r)) $ moveToParent
     modifyStrict $ \s -> s{firstOutline = tail (firstOutline s)}
 
 -- | Create a new outline section pointing to the last created page
-newSection :: T.Text -- ^ Outline title
+newSection :: Monad m => T.Text -- ^ Outline title
            -> Maybe Color -- ^ Outline color
            -> Maybe OutlineStyle -- ^Outline style
-           -> PDF ()
-           -> PDF ()
+           -> PDFT m ()
+           -> PDFT m ()
 newSection myS col style p = newSectionPrivate (toPDFString myS) col style Nothing p
 
 -- | Create a new outline section pointing to a given page
-newSectionWithPage :: T.Text -- ^ Outline title
+newSectionWithPage :: Monad m => T.Text -- ^ Outline title
                    -> Maybe Color -- ^ Outline color
                    -> Maybe OutlineStyle -- ^ Outline style
                    -> PDFReference PDFPage -- ^ Page reference
-                   -> PDF ()
-                   -> PDF ()
+                   -> PDFT m ()
+                   -> PDFT m ()
 newSectionWithPage myS col style page p = newSectionPrivate (toPDFString myS) col style (Just page) p
     
-newSectionPrivate :: PDFString -- ^ Outline title
+newSectionPrivate :: Monad m => PDFString -- ^ Outline title
                   -> Maybe Color -- ^ Outline color
                   -> Maybe OutlineStyle -- ^Outline style
                   -> Maybe (PDFReference PDFPage)
-                  -> PDF ()
-                  -> PDF ()
+                  -> PDFT m ()
+                  -> PDFT m ()
 newSectionPrivate myS col style page p = do
        let newlevel = do
             startNew
@@ -89,11 +89,11 @@ newSectionPrivate myS col style page p = do
            newSibling myS col style page
            newlevel                  
                    
-newSibling :: PDFString -- ^ Outline title
+newSibling :: Monad m => PDFString -- ^ Outline title
            -> Maybe Color -- ^ Outline color
            -> Maybe OutlineStyle -- ^Outline style
            -> Maybe (PDFReference PDFPage)
-           -> PDF ()
+           -> PDFT m ()
 newSibling myS col style page = do
     p <- if isNothing page then gets currentPage else return page
     case p of
@@ -105,11 +105,11 @@ newSibling myS col style page = do
                 Nothing -> modifyStrict $ \s -> s {outline = Just $ insertDown myValue (OutlineLoc (Node myValue []) Top)}
                 Just r -> modifyStrict $ \s -> s {outline = Just $ insertRight myValue r}
                 
-newChild :: PDFString -- ^ Outline title
+newChild :: Monad m => PDFString -- ^ Outline title
          -> Maybe Color -- ^ Outline color
          -> Maybe OutlineStyle -- ^Outline style
          -> Maybe (PDFReference PDFPage)
-         -> PDF ()
+         -> PDFT m ()
 newChild myS col style page = do
     p <- if isNothing page then gets currentPage else return page
     case p of
@@ -121,7 +121,7 @@ newChild myS col style page = do
                 Nothing -> modifyStrict $ \s -> s {outline = Just $ insertDown myValue (OutlineLoc (Node myValue []) Top)}
                 Just r -> modifyStrict $ \s -> s {outline = Just $ insertDown myValue r}
                 
-moveToParent :: PDF ()
+moveToParent :: Monad m => PDFT m ()
 moveToParent = do
     ot <- gets outline
     case ot of

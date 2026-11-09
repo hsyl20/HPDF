@@ -21,7 +21,20 @@ module Graphics.PDF
   (
   -- * HPDF
   -- ** PDF Monad
-    PDF 
+    PDF
+  , PDFT
+  , PdfBuilder
+  , liftPDF
+  , writePdf
+  , writePdfT
+  , renderPdf
+  , renderPdfT
+  -- ** Step by step construction
+  , emptyPdfBuilder
+  , stepPDF
+  , stepPDFT
+  , buildPdf
+  -- ** Deprecated
   , runPdf
   , pdfByteString
   -- ** PDF Common Types
@@ -96,6 +109,7 @@ import qualified Data.ByteString.Lazy as B
 import Data.Int
 import Text.Printf(printf)
 import Control.Monad.State
+import Data.Functor.Identity (runIdentity)
 import Graphics.PDF.Annotation
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Draw
@@ -118,18 +132,8 @@ import Graphics.PDF.Fonts.StandardFont
 import Graphics.PDF.Fonts.Type1
 import Graphics.PDF.Fonts.Encoding (unionEncodings, Encodings(..), PostscriptName)
 
--- | Create a new PDF document and return a first page
--- The page is using the document size by default
-createPDF :: PDF ()
-createPDF  = do
-  -- Create the Proc structure
-  --proc <- addObject PDFProc
-  -- Create an empty resource
-  --addObject $ PDFResource proc
-  return ()
-  
 -- Create the PDF stream objects from the draw monads
-createStreams :: PDF ()
+createStreams :: Monad m => PDFT m ()
 createStreams = do
     ls <- gets streams >>= return . IM.toList
     modifyStrict $ \s -> s {streams = IM.empty}
@@ -185,7 +189,7 @@ createStreams = do
          --updateObject ref (PDFLength (B.length . toLazyByteString $ w'))
 
 -- | Save all the pages and streams in the main object dictionary
-saveObjects :: PDF (PDFReference PDFCatalog)
+saveObjects :: Monad m => PDFT m (PDFReference PDFCatalog)
 saveObjects  = do
   -- Save streams to the object dictionary so that they are saved in the PDF document
   createStreams
@@ -261,9 +265,9 @@ generateStreams root di !nb !totalLen ens (obj:t) =
      in
      (s `B.append`) . generateStreams root di (nb+1) newLen (en : ens) $ t
 
-defaultPdfSettings :: PdfState
+defaultPdfSettings :: PdfBuilder
 defaultPdfSettings = 
-  PdfState {
+  PdfBuilder {
              supplySrc = 1
            , objects = IM.empty
            , pages = noPages
@@ -277,11 +281,34 @@ defaultPdfSettings =
            , firstOutline = [True]
            }
 
-createObjectByteStrings :: PdfState -> PDF a -> B.ByteString 
-createObjectByteStrings pdfState m =
+-- | Builder of a new, empty document
+emptyPdfBuilder :: PDFDocumentInfo
+                -> PDFRect -- ^ Default size for a page
+                -> PdfBuilder
+emptyPdfBuilder infos rect = defaultPdfSettings {defaultRect = rect, docInfo = infos}
+
+-- | Run a 'PDF' action on a document builder and return the new builder
+stepPDF :: PDF a -> PdfBuilder -> (a, PdfBuilder)
+stepPDF m s = runIdentity (stepPDFT m s)
+
+-- | Run a 'PDFT' action on a document builder and return the new builder
+stepPDFT :: PDFT m a -> PdfBuilder -> m (a, PdfBuilder)
+stepPDFT m s = runStateT (unPDFT m) s
+
+-- | Render the document of a builder.
+--
+-- The builder is not modified: the document can still be extended after this
+-- call, and rendered again.
+buildPdf :: PdfBuilder -> B.ByteString
+buildPdf s =
+  let (root, s') = stepPDF saveObjects s
+  in renderDocument root s'
+
+-- | Render the objects of a complete document
+renderDocument :: PDFReference PDFCatalog -> PdfBuilder -> B.ByteString
+renderDocument root s =
       let header = serialize "%PDF-1.5\n"
           objectEncoding (x,a) = toPDF . PDFReferencedObject (fromIntegral $! x) $ a
-          (root,s) = flip runState pdfState  . unPDF $ createPDF >> m >> saveObjects
           objs = objects s
           encodeAnObject im k =
             let Just o = IM.lookup k im
@@ -294,7 +321,7 @@ createObjectByteStrings pdfState m =
           objectContents = header : encodedObjects
           (_nb, _len, _toc) = writeObjectsAndCreateToc objectContents
       in
-      generateStreams root (docInfo pdfState) 0 0 [] objectContents 
+      generateStreams root (docInfo s) 0 0 [] objectContents 
 
         --mconcat$ objectContents ++
         --        [ serialize "xref\n"
@@ -311,21 +338,50 @@ createObjectByteStrings pdfState m =
         --        , serialize "\n%%EOF"
         --        ]
 
--- | Generate a lazy bytestring for the PDF     
-pdfByteString :: PDFDocumentInfo
-              -> PDFRect -- ^ Default size for a page
-              -> PDF a  -- ^ PDF action 
-              -> B.ByteString
-pdfByteString infos rect m = createObjectByteStrings (defaultPdfSettings {defaultRect = rect, docInfo = infos} ) m
+-- | Render a PDF document as a lazy bytestring
+renderPdf :: PDFDocumentInfo
+          -> PDFRect -- ^ Default size for a page
+          -> PDF a  -- ^ PDF action
+          -> B.ByteString
+renderPdf infos rect m = runIdentity (renderPdfT infos rect m)
 
--- | Generates a PDF document
-runPdf :: String -- ^ Name of the PDF document
-       -> PDFDocumentInfo
-       -> PDFRect -- ^ Default size for a page
-       -> PDF a  -- ^ PDF action 
-       -> IO ()
-runPdf filename infos rect m = do
-  let bytestring = pdfByteString infos rect m 
-  B.writeFile filename bytestring
+-- | Render a PDF document as a lazy bytestring, running the PDF action in
+-- the base monad @m@ (see 'PDFT')
+renderPdfT :: Monad m
+           => PDFDocumentInfo
+           -> PDFRect -- ^ Default size for a page
+           -> PDFT m a  -- ^ PDF action
+           -> m B.ByteString
+renderPdfT infos rect m = do
+  (_, s) <- stepPDFT m (emptyPdfBuilder infos rect)
+  return (buildPdf s)
+
+-- | Write a PDF document to a file
+writePdf :: String -- ^ Name of the PDF document
+         -> PDFDocumentInfo
+         -> PDFRect -- ^ Default size for a page
+         -> PDF a  -- ^ PDF action
+         -> IO ()
+writePdf filename infos rect m = B.writeFile filename (renderPdf infos rect m)
+
+-- | Write a PDF document to a file, running the PDF action in the base
+-- monad @m@ (see 'PDFT')
+writePdfT :: MonadIO m
+          => String -- ^ Name of the PDF document
+          -> PDFDocumentInfo
+          -> PDFRect -- ^ Default size for a page
+          -> PDFT m a  -- ^ PDF action
+          -> m ()
+writePdfT filename infos rect m = do
+  bytestring <- renderPdfT infos rect m
+  liftIO (B.writeFile filename bytestring)
+
+{-# DEPRECATED runPdf "Use writePdf" #-}
+runPdf :: String -> PDFDocumentInfo -> PDFRect -> PDF a -> IO ()
+runPdf = writePdf
+
+{-# DEPRECATED pdfByteString "Use renderPdf" #-}
+pdfByteString :: PDFDocumentInfo -> PDFRect -> PDF a -> B.ByteString
+pdfByteString = renderPdf
 
 

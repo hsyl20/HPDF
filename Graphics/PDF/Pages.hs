@@ -54,7 +54,7 @@ import Graphics.PDF.Fonts.Type1
 import Text.Parsec.Error (ParseError)
 
 -- | Set page annotations
-setPageAnnotations :: [AnyAnnotation] -> PDFReference PDFPage -> PDF ()
+setPageAnnotations :: Monad m => [AnyAnnotation] -> PDFReference PDFPage -> PDFT m ()
 setPageAnnotations an page = do
     -- Get the page dictionary
     lPages <- gets pages
@@ -68,7 +68,7 @@ setPageAnnotations an page = do
            modifyStrict $ \s -> s {pages = recordPage page (PDFPage a b c d e f refs) lPages}
            
 -- | Set page resource
-setPageResource :: PDFReference PDFResource -> PDFReference PDFPage -> PDF ()
+setPageResource :: Monad m => PDFReference PDFResource -> PDFReference PDFPage -> PDFT m ()
 setPageResource newr page = do
     -- Get the page dictionary
     lPages <- gets pages
@@ -81,9 +81,9 @@ setPageResource newr page = do
 
 
 -- | Create a new empty content for a page
-createContent :: Draw a -- ^ List of drawing commands
+createContent :: Monad m => Draw a -- ^ List of drawing commands
               -> Maybe (PDFReference PDFPage)
-              -> PDF (PDFReference PDFStream) -- ^ Reference to the drawing
+              -> PDFT m (PDFReference PDFStream) -- ^ Reference to the drawing
 createContent d page = do
   -- Create a new stream referenbce
   streamref <- supply
@@ -93,14 +93,14 @@ createContent d page = do
   return (PDFReference streamref)
 
 -- | Returns a new unique identifier
-supply :: PDF Int
+supply :: Monad m => PDFT m Int
 supply = do
           r <- gets supplySrc
           modifyStrict $ \s -> s {supplySrc = r+1}
           return r
      
 -- | Add an object to the PDF object dictionary and return a PDF reference     
-addObject :: (PdfObject a, PdfLengthInfo a) => a -> PDF (PDFReference a)
+addObject :: (PdfObject a, PdfLengthInfo a, Monad m) => a -> PDFT m (PDFReference a)
 addObject a = do
   r <- supply
   modifyStrict $ \s -> s {objects = IM.insert r (AnyPdfObject a) (objects s)}
@@ -108,9 +108,9 @@ addObject a = do
   
 
 -- | Update a referenced object with a new one
-updateObject :: (PdfObject a, PdfLengthInfo a) => PDFReference a -- ^ Reference to the initial object
+updateObject :: (PdfObject a, PdfLengthInfo a, Monad m) => PDFReference a -- ^ Reference to the initial object
              -> a -- ^ New value
-             -> PDF ()
+             -> PDFT m ()
 updateObject (PDFReference i) obj = do
    modifyStrict $ \s -> s {objects = IM.insert i (AnyPdfObject obj) (objects s)}
 
@@ -141,10 +141,10 @@ findPage :: PDFReference PDFPage -- ^ Reference to the page
 findPage page (Pages lPages) = PT.lookup page lPages
 
 -- | Add a node PDFTree object
-nodePage :: Maybe (PDFReference PDFPages) -- ^ Parent node
+nodePage :: Monad m => Maybe (PDFReference PDFPages) -- ^ Parent node
          -> PDFTree PDFPage -- ^ Left tree
          -> PDFTree PDFPage -- ^ Right tree
-         -> PDF (Int,PDFReference PDFPages) -- ^ PDF reference to the new node pointing to the left and right ones
+         -> PDFT m (Int,PDFReference PDFPages) -- ^ PDF reference to the new node pointing to the left and right ones
 nodePage ref l r = do
     n <- supply
     -- Reserve an identifier for the root page object
@@ -161,10 +161,10 @@ nodePage ref l r = do
         
   
 -- | Add a page to the PDG object dictionary
-leafPage :: Maybe (PDFReference PDFPages) -- ^ Page parent if any
+leafPage :: Monad m => Maybe (PDFReference PDFPages) -- ^ Page parent if any
          -> Key PDFPage -- ^ Page reference
          -> PDFPage -- ^ Page data
-         -> PDF (Int,PDFReference PDFPages)  -- ^ Reference to a PDFPages objects
+         -> PDFT m (Int,PDFReference PDFPages)  -- ^ Reference to a PDFPages objects
 leafPage (Just ref) (PDFReference objectnb) (PDFPage _ a b c d e f) = do
       modifyStrict $ \s -> s {objects = IM.insert objectnb (AnyPdfObject $ PDFPage (Just ref) a b c d e f) (objects s) }
       return (1,ref)
@@ -178,7 +178,7 @@ leafPage Nothing p@(PDFReference objectnb) (PDFPage _ a b c d e f) = do
      return (1,pRef)   
                   
 -- | Add all pages to the PDF object dictionary
-addPages :: PDF (PDFReference PDFPages)
+addPages :: Monad m => PDFT m (PDFReference PDFPages)
 addPages = do
     Pages lPages <- gets pages
     (_,r) <- PT.fold2 Nothing nodePage leafPage lPages
@@ -213,7 +213,7 @@ up (OutlineLoc t (Child v c ls rs)) = let t' = Node v  (ls ++ [t] ++ rs)
                                   in OutlineLoc t' c
                               
 
-addOutlines :: Maybe Outline -> PDF (Maybe (PDFReference PDFOutline))
+addOutlines :: Monad m => Maybe Outline -> PDFT m (Maybe (PDFReference PDFOutline))
 addOutlines Nothing = return Nothing
 addOutlines (Just r) = do
   let (Node _ l) = toTree r
@@ -227,7 +227,7 @@ addOutlines (Just r) = do
       return (Just (PDFReference rootRef))
       
  
-createOutline :: PDFReference PDFOutlineEntry -> [Tree OutlineData] -> PDF (PDFReference PDFOutlineEntry,PDFReference PDFOutlineEntry)
+createOutline :: Monad m => PDFReference PDFOutlineEntry -> [Tree OutlineData] -> PDFT m (PDFReference PDFOutlineEntry,PDFReference PDFOutlineEntry)
 createOutline r children = do
     -- Get references for all these outlines
     refs' <- mapM (const (supply >>= return . Just . PDFReference)) children
@@ -265,19 +265,19 @@ toTree a = toTree (up a)
 
 
 -- | Reference to the last created page
-getCurrentPage :: PDF (Maybe (PDFReference PDFPage))
+getCurrentPage :: Monad m => PDFT m (Maybe (PDFReference PDFPage))
 getCurrentPage = gets currentPage
 
 -- | Record bound of an xobject
-recordBound :: Int -- ^ Reference
+recordBound :: Monad m => Int -- ^ Reference
             -> PDFFloat -- ^ Width
             -> PDFFloat -- ^ Height
-            -> PDF ()
+            -> PDFT m ()
 recordBound ref width height = modifyStrict $ \s -> s {xobjectBound = IM.insert ref (width,height) (xobjectBound s)}
 
 
 -- | Create an embedded font
-createEmbeddedFont :: FontData -> PDF (PDFReference EmbeddedFont)
+createEmbeddedFont :: Monad m => FontData -> PDFT m (PDFReference EmbeddedFont)
 createEmbeddedFont (Type1Data d) = do 
     PDFReference s <-  createContent (tell $ fromByteString d) Nothing 
     return (PDFReference s)
@@ -316,7 +316,7 @@ readType1FontWithEncoding encoding pfb afmPath = do
 -- >>>   Right myFontStructure -> run docInfo docRect $ do
 -- >>>       myFont <- mkType1Font myFontStructure
 -- >>>       …
-mkType1Font :: Type1FontStructure -> PDF AnyFont
+mkType1Font :: Monad m => Type1FontStructure -> PDFT m AnyFont
 mkType1Font (Type1FontStructure fd fs) = do
    ref <- createEmbeddedFont fd
    return (AnyFont $ Type1Font fs ref)

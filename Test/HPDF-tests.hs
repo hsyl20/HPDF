@@ -5,7 +5,12 @@ module Main where
 import Test.Framework
 import Data.Either (isRight)
 
+import Graphics.PDF
 import Graphics.PDF.Image(JpegFile, readJpegDataURL, jpegBounds)
+
+import Control.Monad.IO.Class (liftIO)
+import Data.IORef
+import qualified Data.ByteString.Lazy as B
 
 main = htfMain htf_thisModulesTests
 
@@ -25,3 +30,58 @@ test_decodeTick = case (readJpegDataURL raw_jpeg) of
 
 test_bounds :: IO()
 test_bounds =  assertEqual raw_jpeg_bounds (jpegBounds jpg)
+
+-- | The PDF monad transformer runs base monad effects in order and generates
+-- the same document as the pure PDF monad
+test_pdft :: IO()
+test_pdft = do
+    ref <- newIORef ([] :: [String])
+    let rect = PDFRect 0 0 600 400
+        doc :: PDFT IO ()
+        doc = do
+            liftIO $ modifyIORef ref ("start":)
+            page <- addPage Nothing
+            img <- createPDFJpeg jpg
+            liftIO $ modifyIORef ref ("image":)
+            drawWithPage page $ drawXObject img
+            liftPDF pureTail
+            liftIO $ modifyIORef ref ("end":)
+        pureTail :: PDF ()
+        pureTail = do
+            page <- addPage Nothing
+            drawWithPage page $ return ()
+        pureDoc :: PDF ()
+        pureDoc = do
+            page <- addPage Nothing
+            img <- createPDFJpeg jpg
+            drawWithPage page $ drawXObject img
+            pureTail
+    bs <- renderPdfT standardDocInfo rect doc
+    effects <- readIORef ref
+    assertEqual ["end","image","start"] effects
+    assertBool (B.isPrefixOf "%PDF-1.5" bs)
+    assertEqual (renderPdf standardDocInfo rect pureDoc) bs
+
+-- | The step interface builds the same document as the PDF monad, and
+-- rendering an intermediate builder does not alter it
+test_steps :: IO()
+test_steps = do
+    let rect = PDFRect 0 0 600 400
+        addImagePage :: PDF ()
+        addImagePage = do
+            page <- addPage Nothing
+            img <- createPDFJpeg jpg
+            drawWithPage page $ drawXObject img
+        addEmptyPage :: PDF ()
+        addEmptyPage = do
+            page <- addPage Nothing
+            drawWithPage page $ return ()
+        s0 = emptyPdfBuilder standardDocInfo rect
+        ((), s1) = stepPDF addImagePage s0
+        snapshot = buildPdf s1
+    ((), s2) <- stepPDFT (liftPDF addEmptyPage) s1
+    assertEqual (renderPdf standardDocInfo rect addImagePage) snapshot
+    assertEqual (renderPdf standardDocInfo rect (addImagePage >> addEmptyPage))
+                (buildPdf s2)
+    -- the snapshot did not alter s1
+    assertEqual snapshot (buildPdf s1)

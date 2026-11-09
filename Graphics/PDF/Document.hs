@@ -61,21 +61,21 @@ standardDocInfo :: PDFDocumentInfo
 standardDocInfo = PDFDocumentInfo T.empty T.empty UseNone SinglePage standardViewerPrefs True
 
 -- | Create a PDF XObject
-createPDFXForm :: PDFFloat -- ^ Left
+createPDFXForm :: Monad m => PDFFloat -- ^ Left
               -> PDFFloat -- ^ Bottom
               -> PDFFloat -- ^ Right
               -> PDFFloat -- ^ Top
               -> Draw a -- ^ Drawing commands
-              -> PDF (PDFReference PDFXForm)
+              -> PDFT m (PDFReference PDFXForm)
 createPDFXForm xa ya xb yb d =
     createPDFXFormExtra (Rectangle (xa:+ya) (xb:+yb)) d emptyDictionary
 
 -- | Create a PDF XObject
-createPDFXFormExtra ::
+createPDFXFormExtra :: Monad m =>
                  Rectangle -- ^ Bounding Box
               -> Draw a -- ^ Drawing commands
               -> PDFDictionary
-              -> PDF (PDFReference PDFXForm)
+              -> PDFT m (PDFReference PDFXForm)
 createPDFXFormExtra (Rectangle (xa:+ya) (xb:+yb)) d dict =
  let a' = do
             modifyStrict $ \s -> s {
@@ -95,8 +95,8 @@ createPDFXFormExtra (Rectangle (xa:+ya) (xb:+yb)) d dict =
 
  
 -- Create a new empty page
-createANewPage :: Maybe PDFRect -- ^ Page size or default document's one
-               -> PDF (Int,PDFPage) -- ^ Reference to the new page
+createANewPage :: Monad m => Maybe PDFRect -- ^ Page size or default document's one
+               -> PDFT m (Int,PDFPage) -- ^ Reference to the new page
 createANewPage rect' = do
        rect <- maybe (gets defaultRect) return rect'
        -- Get the root page reference
@@ -109,18 +109,18 @@ createANewPage rect' = do
        return (pageref , page)
        
 -- | Add a new page to a PDF document
-addPage :: Maybe PDFRect -- ^ Page size or default document's one
-        -> PDF (PDFReference PDFPage) -- ^ Reference to the new page
+addPage :: Monad m => Maybe PDFRect -- ^ Page size or default document's one
+        -> PDFT m (PDFReference PDFPage) -- ^ Reference to the new page
 addPage rect'   = do
    (pf,page) <- createANewPage rect'
    let pageref = PDFReference pf
    modifyStrict $ \s -> s {pages = recordPage pageref page (pages s), currentPage = Just pageref}
    return pageref
    
-addPageWithTransition :: Maybe PDFRect -- ^ Page size or default document's one
+addPageWithTransition :: Monad m => Maybe PDFRect -- ^ Page size or default document's one
                       -> Maybe PDFFloat -- ^ Optional duration
                       -> Maybe PDFTransition -- ^ Optional transition
-                      -> PDF (PDFReference PDFPage) -- ^ Reference to the new page
+                      -> PDFT m (PDFReference PDFPage) -- ^ Reference to the new page
 addPageWithTransition rect' dur t = do
     (pf,PDFPage a b c d _ _ pageAnnots) <- createANewPage rect'
     let pageref = PDFReference pf
@@ -129,9 +129,9 @@ addPageWithTransition rect' dur t = do
 
         
 -- | Draw on a given page
-drawWithPage :: PDFReference PDFPage -- ^ Page
+drawWithPage :: Monad m => PDFReference PDFPage -- ^ Page
             -> Draw a -- ^ Drawing commands
-            -> PDF a
+            -> PDFT m a
 drawWithPage page draw = do
      -- Get the page dictionary
      lPages <- gets pages

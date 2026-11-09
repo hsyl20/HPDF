@@ -43,10 +43,12 @@ module Graphics.PDF.Draw(
  , AnyPdfXForm
  , pdfDictMember
  -- PDF types
- , PDF(..)
+ , PDF
+ , PDFT(..)
+ , liftPDF
  , PDFPage(..)
  , PDFPages(..)
- , PdfState(..)
+ , PdfBuilder(..)
  , PDFCatalog(..)
  , Pages(..)
  , PDFDocumentPageMode(..)
@@ -123,6 +125,10 @@ import Data.STRef
 import Control.Monad.Writer.Class
 import Control.Monad.Reader.Class
 import Control.Monad.State
+import Data.Functor.Identity (Identity, runIdentity)
+#if !MIN_VERSION_base(4,13,0)
+import Control.Monad.Fail (MonadFail)
+#endif
 
 import qualified Graphics.PDF.Expression as Expr
 import Graphics.PDF.Expression (PDFExpression)
@@ -139,7 +145,7 @@ import Text.Printf (printf)
 data AnnotationStyle = AnnotationStyle !(Maybe Color)
 
 class AnnotationObject a where
-    addAnnotation :: a -> PDF (PDFReference a)
+    addAnnotation :: Monad m => a -> PDFT m (PDFReference a)
     annotationType :: a -> PDFName
     annotationContent :: a -> AnyPdfObject
     annotationRect :: a -> [PDFFloat]
@@ -373,7 +379,7 @@ registerResource dict getMap setMap resource = do
 instance PDFGlobals Draw where
     bounds (PDFReference r) = getBoundInDraw r
     
-instance PDFGlobals PDF where
+instance Monad m => PDFGlobals (PDFT m) where
     bounds (PDFReference r) = getBoundInPDF r
     
 -- | A PDF Xobject which can be drawn
@@ -421,8 +427,9 @@ getBoundInDraw ref = do
     return $ IM.findWithDefault (0.0,0.0) ref theBounds
  
 -- | Get the bounds for an xobject
-getBoundInPDF :: Int -- ^ Reference
-              -> PDF (PDFFloat,PDFFloat)  
+getBoundInPDF :: Monad m
+              => Int -- ^ Reference
+              -> PDFT m (PDFFloat,PDFFloat)
 getBoundInPDF ref = do
     theBounds <- gets xobjectBound
     return $ IM.findWithDefault (0.0,0.0) ref theBounds
@@ -442,7 +449,7 @@ data PDFCatalog = PDFCatalog
                    !PDFViewerPreferences
 
 -- | The PDF state
-data PdfState = PdfState { supplySrc :: !Int -- ^ Supply of unique identifiers
+data PdfBuilder = PdfBuilder { supplySrc :: !Int -- ^ Supply of unique identifiers
                          , objects :: !(IM.IntMap AnyPdfObject) -- ^ Dictionary of PDF objects
                          , pages :: !Pages -- ^ Pages
                          , streams :: !(IM.IntMap ((Maybe (PDFReference PDFPage)),(DrawState,BU.Builder))) -- ^ Draw commands
@@ -514,15 +521,37 @@ data PDFTransDirection2 = LeftToRight
                         | TopLeftToBottomRight -- ^ Glitter only
                         deriving(Eq)
 
+-- Note [The PDF monad transformer]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- A document is built by actions on a PdfBuilder (object table, pages, pending
+-- streams, outline...). PDFT m is StateT PdfBuilder m. The base monad m lets
+-- the user interleave other effects with the construction of the document:
+--
+--   foo :: PDFT IO ()
+--   foo = do
+--     Right jpg <- liftIO (readJpegFile "map.jpg")
+--     img <- createPDFJpeg jpg
+--     ...
+--
+-- PDF is the pure case: PDFT Identity. The library functions are typed
+-- "Monad m => PDFT m a" so that they work in every stack. They only use
+-- MonadState PdfBuilder, so this generalization is free. liftPDF embeds a
+-- monomorphic PDF action in any PDFT m.
+--
+-- PdfBuilder is exported abstractly (type only) from Graphics.PDF. Its fields
+-- carry invariants (e.g. supplySrc is above every key of objects and
+-- streams), so user code must not build or modify it directly.
+
+-- | The PDF monad transformer. See Note [The PDF monad transformer].
+newtype PDFT m a = PDFT {unPDFT :: StateT PdfBuilder m a}
+  deriving (Functor, Applicative, Monad, MonadState PdfBuilder, MonadTrans, MonadIO, MonadFail)
+
 -- | The PDF Monad
-newtype PDF a = PDF {unPDF :: State PdfState a}
-#ifndef __HADDOCK__
-  deriving (Functor, Applicative, Monad, MonadState PdfState)
-#else
-instance Functor PDF
-instance Monad PDF
-instance MonadState PdfState PDF
-#endif
+type PDF = PDFT Identity
+
+-- | Run a pure 'PDF' action in any 'PDFT' stack
+liftPDF :: Monad m => PDF a -> PDFT m a
+liftPDF (PDFT m) = PDFT (mapStateT (return . runIdentity) m)
 
 -- | Transition style
 data PDFTransStyle = Split PDFTransDimension PDFTransDirection
