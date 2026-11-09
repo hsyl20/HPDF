@@ -42,7 +42,7 @@ data TilingType = ConstantSpacing
                 deriving(Eq,Enum)
   
 -- | Create a colored tiling pattern
-createColoredTiling :: PDFFloat -- ^ Left
+createColoredTiling :: Monad m => PDFFloat -- ^ Left
                     -> PDFFloat -- ^ Bottom
                     -> PDFFloat -- ^ Right
                     -> PDFFloat -- ^ Top
@@ -50,11 +50,11 @@ createColoredTiling :: PDFFloat -- ^ Left
                     -> PDFFloat -- ^ Vertical step
                     -> TilingType
                     -> Draw a -- ^ Drawing commands
-                    -> PDF (PDFReference PDFColoredPattern)
+                    -> PDFT m (PDFReference PDFColoredPattern)
 createColoredTiling  xa ya xb yb hstep vstep  tt d =  createTilingPattern xa ya xb yb hstep vstep ColoredTiling tt d  >>= return . PDFReference
  
 -- | Create an uncolored tiling pattern
-createUncoloredTiling :: PDFFloat -- ^ Left
+createUncoloredTiling :: Monad m => PDFFloat -- ^ Left
                       -> PDFFloat -- ^ Bottom
                       -> PDFFloat -- ^ Right
                       -> PDFFloat -- ^ Top
@@ -62,11 +62,11 @@ createUncoloredTiling :: PDFFloat -- ^ Left
                       -> PDFFloat -- ^ Vertical step
                       -> TilingType
                       -> Draw a -- ^ Drawing commands
-                      -> PDF (PDFReference PDFUncoloredPattern)
+                      -> PDFT m (PDFReference PDFUncoloredPattern)
 createUncoloredTiling  xa ya xb yb hstep vstep  tt d =  createTilingPattern xa ya xb yb hstep vstep UncoloredTiling tt d >>= return . PDFReference  
 
 -- | Create a PDF tiling pattern
-createTilingPattern :: PDFFloat -- ^ Left
+createTilingPattern :: Monad m => PDFFloat -- ^ Left
                     -> PDFFloat -- ^ Bottom
                     -> PDFFloat -- ^ Right
                     -> PDFFloat -- ^ Top
@@ -75,7 +75,7 @@ createTilingPattern :: PDFFloat -- ^ Left
                     -> PaintType
                     -> TilingType
                     -> Draw a -- ^ Drawing commands
-                    -> PDF Int
+                    -> PDFT m Int
 createTilingPattern xa ya xb yb hstep vstep pt tt d = 
     let a' = do modifyStrict $ \s -> s  {otherRsrcs = dictFromList $
                                              [ entry "Type" (PDFName $ "Pattern")

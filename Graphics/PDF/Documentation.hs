@@ -50,11 +50,45 @@ So, a standard way to start a PDF document is with:
 main :: IO()
 main = do
     let rect = 'PDFRect' 0 0 600 400
-    'runPdf' \"demo.pdf\" ('standardDocInfo' { author=\"alpheccar\", compressed = False}) rect $ do
+    'writePdf' \"demo.pdf\" ('standardDocInfo' { author=\"alpheccar\", compressed = False}) rect $ do
         myDocument
 @
 
 where myDocument is generating the pages and is a value of the PDF monad.
+
+The 'PDF' monad is pure: 'PDF' is @'PDFT' Identity@. If you must do other
+effects while you build the document (for example to load images from the disk
+or from the network), use the 'PDFT' monad transformer with 'writePdfT' or
+'renderPdfT'. All the functions of this library work in @'PDFT' m@ for any
+monad @m@:
+
+@
+main :: IO()
+main = do
+    let rect = 'PDFRect' 0 0 600 400
+    'writePdfT' \"demo.pdf\" 'standardDocInfo' rect $ do
+        Right jpg <- liftIO $ 'readJpegFile' \"logo.jpg\"
+        img <- 'createPDFJpeg' jpg
+        page <- 'addPage' Nothing
+        'drawWithPage' page $ 'drawXObject' img
+@
+
+A value of type @'PDF' a@ (for example one coming from another library) can be
+used in @'PDFT' m@ with 'liftPDF'.
+
+You can also build the document step by step, outside of the 'PDF' monad.
+'emptyPdfBuilder' creates the builder of an empty document, 'stepPDF' (or
+'stepPDFT') runs a 'PDF' action on a builder and returns the new builder, and
+'buildPdf' renders the document of a builder. A builder is a plain value: you can keep
+it between two calls, render it at any time and continue to build the
+document after that.
+
+@
+let s0 = 'emptyPdfBuilder' 'standardDocInfo' rect
+    (page, s1) = 'stepPDF' ('addPage' Nothing) s0
+    ((), s2) = 'stepPDF' ('drawWithPage' page $ 'drawXObject' img) s1
+Data.ByteString.Lazy.writeFile \"demo.pdf\" ('buildPdf' s2)
+@
 -}
 
 

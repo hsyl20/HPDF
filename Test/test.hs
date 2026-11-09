@@ -800,7 +800,7 @@ main = do
 
     let logoPath = "Test/logo.jpg"
     Right jpg <- readJpegFile logoPath
-    runPdf "demo.pdf" (standardDocInfo { author= "alpheccar éèçàü", compressed = False}) rect $ do
+    writePdf "demo.pdf" (standardDocInfo { author= "alpheccar éèçàü", compressed = False}) rect $ do
         testAll timesRoman timesBold helveticaBold symbol zapf jpg
     --print $ charWidth (PDFFont Times_Roman 1) '('
      

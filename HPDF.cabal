@@ -1,5 +1,5 @@
 Name: HPDF
-Version: 1.8
+Version: 1.9
 cabal-version: >=1.10
 License: BSD3
 License-file:LICENSE
@@ -56,7 +56,8 @@ Test-Suite HPDF-Tests
   hs-source-dirs:    Test
   Build-depends:     base >= 4, 
                      HTF >= 0.10,
-                     HPDF
+                     HPDF,
+                     bytestring
   build-tool-depends:
     HTF:htfpp
   Default-language:  Haskell2010

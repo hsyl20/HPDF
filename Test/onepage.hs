@@ -82,7 +82,7 @@ main = do
     Right fontData <- readType1Font testFont afm
     Right timesRoman <- mkStdFont Times_Roman
     let rect = PDFRect 0 0 600 400
-    runPdf "demo.pdf" (standardDocInfo { author= "alpheccar éèçàü", compressed = False}) rect $ do
+    writePdf "demo.pdf" (standardDocInfo { author= "alpheccar éèçàü", compressed = False}) rect $ do
         testFont <- mkType1Font fontData
         testAll (PDFFont testFont debugFontSize)
         traceM . show $ (spaceGlyph testFont)

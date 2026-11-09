@@ -1,5 +1,18 @@
 # Changelog for [`HPDF` package](http://hackage.haskell.org/package/HPDF)
 
+## 1.9
+
+   * Add the `PDFT` monad transformer. `PDF` is now `PDFT Identity` and the
+     library functions work in `PDFT m` for any monad `m`, so that other
+     effects (e.g. IO) can be interleaved with the construction of the
+     document (#21)
+   * Add `writePdfT`, `renderPdfT` and `liftPDF`
+   * Rename `runPdf` to `writePdf` and `pdfByteString` to `renderPdf`. The old
+     names are kept as deprecated aliases
+   * Add a step by step interface: `emptyPdfBuilder`, `stepPDF`, `stepPDFT`
+     and `buildPdf`
+   * Export the `PdfBuilder` type (abstractly)
+
 ## 1.8
 
    * Added Github CI

@@ -19,7 +19,7 @@ module Graphics.PDF.Transparency(
 
 import qualified Graphics.PDF.Draw as Draw
 import Graphics.PDF.Document (createPDFXFormExtra)
-import Graphics.PDF.Draw (PDF, Draw, SoftMask(SoftMask))
+import Graphics.PDF.Draw (PDFT, Draw, SoftMask(SoftMask))
 import Graphics.PDF.Shapes (Rectangle)
 import Graphics.PDF.LowLevel.Serializer (serialize)
 import Graphics.PDF.LowLevel.Types
@@ -29,19 +29,19 @@ import Control.Monad (void)
 
 
 
-createSoftMask ::
+createSoftMask :: Monad m =>
        Rectangle -- ^ Bounding box
     -> Draw a -- ^ Content of the soft mask
-    -> PDF SoftMask
+    -> PDFT m SoftMask
 createSoftMask bbox =
     fmap SoftMask .
     createTransparencyGroup Draw.GraySpace bbox
 
-createTransparencyGroup ::
+createTransparencyGroup :: Monad m =>
        Draw.ColorSpace a e
     -> Rectangle -- ^ Bounding box
     -> Draw b -- ^ Painting
-    -> PDF (PDFReference Draw.PDFXForm)
+    -> PDFT m (PDFReference Draw.PDFXForm)
 createTransparencyGroup space bbox img =
     createPDFXFormExtra bbox img $
         dictFromList $
