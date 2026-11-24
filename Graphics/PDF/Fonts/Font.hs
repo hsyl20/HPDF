@@ -48,6 +48,8 @@ emptyFontStructure = FS { baseFont = ""
                         , fontBBox = []
                         , italicAngle = 0
                         , capHeight = 0
+                        , stemV = 0
+                        , glyphNames = M.empty
                         , fixedPitch = False
                         , serif = False
                         , symbolic = False

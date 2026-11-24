@@ -59,6 +59,7 @@ data AFMFont = AFMFont { metrics :: [Metric]
                        , encodingScheme :: EncodingScheme
                        , afmItalic :: Double 
                        , afmCapHeight :: Int
+                       , afmStemV :: Int
                        , afmBBox :: [Double]
                        , afmFixedPitch :: Bool
                        , afmSymbolic :: Bool
@@ -79,6 +80,7 @@ emptyAFM = AFMFont { metrics = []
                    , encodingScheme = AFMAdobeStandardEncoding
                    , afmItalic = 0.0
                    , afmCapHeight = 0
+                   , afmStemV = 0
                    , afmBBox = []
                    , afmFixedPitch = False
                    , afmSymbolic = False
@@ -266,6 +268,7 @@ specific = choice [ try $ keyword "FontName" (getString >>= \name' -> modifyStat
                   , try $ keyword "UnderlineThickness" (getInt >>= \name' -> modifyState $ \afm' -> afm' {underlineThickness = name'})
                   , try $ keyword "EncodingScheme" (getEncoding >>= \name' -> modifyState $ \afm' -> afm' {encodingScheme = name'})
                   , try $ keyword "CapHeight" (getInt >>= \name' -> modifyState $ \afm' -> afm' {afmCapHeight = name'}) 
+                  , try $ keyword "StdVW" (getFloat >>= \name' -> modifyState $ \afm' -> afm' {afmStemV = round name'}) 
                   , try $ keyword "Ascender" (getInt >>= \name' -> modifyState $ \afm' -> afm' {afmAscent = name'})
                   , try $ keyword "Descender" (getInt >>= \name' -> modifyState $ \afm' -> afm' {afmDescent = name'}) 
                   , try $ keyword "ItalicAngle" (getFloat >>= \name' -> modifyState $ \afm' -> afm' {afmItalic = name'}) 
@@ -363,10 +366,14 @@ fontToStructure afm' encoding' maybeMapNameToGlyph =
                               , smallCap = False
                               , forceBold = False
                               , baseFont = type1BaseFont afm'
+                              , stemV = fromIntegral $ afmStemV afm'
+                              , glyphNames = foldr add_glyph_name M.empty (metrics afm')
                               }
       addName m d | charCode m == -1 = d
                   | otherwise = M.insert (name m) (fromIntegral $ charCode m) d 
       nameToGlyph = maybe (foldr addName M.empty (metrics afm')) id maybeMapNameToGlyph
+      add_glyph_name m d | charCode m == -1 = d
+                         | otherwise = M.insert (fromIntegral $ charCode m) (name m) d
       fs1 = foldr (addMetric nameToGlyph) fs (metrics afm')
       addEncodingMapping (pname,glyphcode) d = 
          let unicodeM = M.lookup pname encoding' 

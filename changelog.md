@@ -12,6 +12,9 @@
    * Add a step by step interface: `emptyPdfBuilder`, `stepPDF`, `stepPDFT`
      and `buildPdf`
    * Export the `PdfBuilder` type (abstractly)
+   * Fix custom Type 1 fonts that PDF readers embedded but did not use:
+     write a valid font descriptor, an encoding with the glyph names, and the
+     font file without the PFB segment headers (#24)
 
 ## 1.8
 
