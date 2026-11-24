@@ -23,6 +23,7 @@ module Graphics.PDF.Fonts.FontTypes
 where
 
 import Graphics.PDF.LowLevel.Types
+import Graphics.PDF.Fonts.Encoding (PostscriptName)
 import qualified Data.Map.Strict as M
 import qualified Data.ByteString as B
 import Data.Word 
@@ -48,6 +49,8 @@ data FontStructure = FS { baseFont :: String
                         , fontBBox :: [PDFFloat]
                         , italicAngle :: !PDFFloat
                         , capHeight :: !GlyphSize 
+                        , stemV :: !GlyphSize
+                        , glyphNames :: M.Map GlyphCode PostscriptName
                         , fixedPitch :: !Bool 
                         , serif :: !Bool 
                         , symbolic :: !Bool 

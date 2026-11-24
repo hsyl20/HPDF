@@ -4,13 +4,23 @@ module Main where
 
 import Test.Framework
 import Data.Either (isRight)
+import Data.Word (Word8)
+import System.Directory (removeFile)
 
 import Graphics.PDF
 import Graphics.PDF.Image(JpegFile, readJpegDataURL, jpegBounds)
 
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef
+import Data.Word (Word8)
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.IO (hClose, openBinaryTempFile)
 import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BC
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BC
+import qualified Data.Map as M
 
 main = htfMain htf_thisModulesTests
 
@@ -30,6 +40,76 @@ test_decodeTick = case (readJpegDataURL raw_jpeg) of
 
 test_bounds :: IO()
 test_bounds =  assertEqual raw_jpeg_bounds (jpegBounds jpg)
+
+-- A Type 1 font that is not in the Adobe standard encoding.
+-- The glyphs "alpha" and "beta" have the character codes 33 and 34.
+type1_afm :: BS.ByteString
+type1_afm = BC.pack $ unlines
+    [ "StartFontMetrics 2.0"
+    , "FontName Test-Icons"
+    , "EncodingScheme FontSpecific"
+    , "FontBBox 0 -200 1000 800"
+    , "CapHeight 700"
+    , "Ascender 800"
+    , "Descender -200"
+    , "StdVW 80"
+    , "StartCharMetrics 2"
+    , "C 33 ; WX 600 ; N alpha ; B 0 0 600 700 ;"
+    , "C 34 ; WX 700 ; N beta ; B 0 0 700 700 ;"
+    , "EndCharMetrics"
+    , "EndFontMetrics"
+    ]
+
+type1_pfb_clear, type1_pfb_binary, type1_pfb_trailer :: BS.ByteString
+type1_pfb_clear = BC.pack "%!PS-AdobeFont-1.0: Test-Icons\ncurrentfile eexec\n"
+type1_pfb_binary = BS.pack [1, 2, 3, 4, 5, 6, 7, 8]
+type1_pfb_trailer = BC.pack "0000\ncleartomark\n"
+
+-- A PFB file with one segment for each portion of the font program.
+type1_pfb :: BS.ByteString
+type1_pfb = BS.concat
+    [ segment 1 type1_pfb_clear
+    , segment 2 type1_pfb_binary
+    , segment 1 type1_pfb_trailer
+    , BS.pack [0x80, 3]
+    ]
+  where
+    segment t d = BS.concat [BS.pack (0x80 : t : le32 (BS.length d)), d]
+    le32 :: Int -> [Word8]
+    le32 n = [fromIntegral (n `div` (256 ^ i) `mod` 256) | i <- [0 .. 3 :: Int]]
+
+-- | A custom Type 1 font has a font descriptor, an encoding with the glyph
+-- names and a font file without the PFB segment headers.
+-- See Note [Type 1 font embedding] in Graphics.PDF.Fonts.Type1
+test_type1FontDescriptor :: IO ()
+test_type1FontDescriptor = do
+    let rect = PDFRect 0 0 600 400
+        encs = OtherEncoding (M.fromList [("alpha", '\xE000'), ("beta", '\xE001')])
+        dir = "dist-newstyle"
+        pfb = dir ++ "/hpdf-test-type1.pfb"
+        afmPath = dir ++ "/hpdf-test-type1.afm"
+    BS.writeFile pfb type1_pfb
+    BS.writeFile afmPath type1_afm
+    Right fs <- readType1FontWithEncoding encs pfb afmPath
+    removeFile pfb
+    removeFile afmPath
+    let doc :: PDF ()
+        doc = do
+            font <- mkType1Font fs
+            page <- addPage Nothing
+            drawWithPage page $ drawText $ text (PDFFont font 12) 10 10 "\xE000\xE001"
+        bs = B.toStrict (renderPdf standardDocInfo{compressed = False} rect doc)
+        has x = assertBool (BC.pack x `BS.isInfixOf` bs)
+        hasNot x = assertBool (not (BC.pack x `BS.isInfixOf` bs))
+    has "/Type /FontDescriptor"
+    has "/FontName /Test-Icons"
+    has "/StemV 80"
+    has "/Differences [33 /alpha /beta ]"
+    has "/Length1 49"
+    has "/Length2 8"
+    has "/Length3 17"
+    hasNot "\x80\x01"
+    hasNot "\x80\x02"
 
 -- | The PDF monad transformer runs base monad effects in order and generates
 -- the same document as the pure PDF monad

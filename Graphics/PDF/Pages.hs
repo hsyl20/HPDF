@@ -44,6 +44,7 @@ import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Draw
 import qualified Graphics.PDF.Data.PDFTree as PT hiding(PDFTree,Key)
 import Graphics.PDF.Resources
+import Graphics.PDF.Fonts.Type1
 import Data.List(zip4)
 import Graphics.PDF.Fonts.Font
 import Graphics.PDF.Data.PDFTree(PDFTree,Key)
@@ -279,7 +280,13 @@ recordBound ref width height = modifyStrict $ \s -> s {xobjectBound = IM.insert 
 -- | Create an embedded font
 createEmbeddedFont :: Monad m => FontData -> PDFT m (PDFReference EmbeddedFont)
 createEmbeddedFont (Type1Data d) = do 
-    PDFReference s <-  createContent (tell $ fromByteString d) Nothing 
+    let (d', l1, l2, l3) = type1FontFile d
+        lens = dictFromList [ entry "Length1" (PDFInteger l1)
+                            , entry "Length2" (PDFInteger l2)
+                            , entry "Length3" (PDFInteger l3)
+                            ]
+    PDFReference s <- createContent (tell $ fromByteString d') Nothing 
+    modifyStrict $ \st -> st {streams = IM.adjust (\(p,(state',w')) -> (p,(state' {otherRsrcs = pdfDictUnion lens (otherRsrcs state')},w'))) s (streams st)}
     return (PDFReference s)
 
 -- | Create a type 1 font from pfb and afm files
