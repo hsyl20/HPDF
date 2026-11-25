@@ -756,6 +756,33 @@ test_numbersWithFiveDecimals = do
   assertBool (C.pack "\n0 0 m" `BS.isInfixOf` one (-0.000001))
   assertBool (C.pack "\n0 0 m" `BS.isInfixOf` one (-0.0))
 
+-- A number that is not finite is an error, and 'writePdf' leaves no
+-- incomplete file.
+-- See Note [Numbers with five decimals] in Graphics.PDF.LowLevel.Serializer
+test_numbersThatAreNotFinite :: IO ()
+test_numbersThatAreNotFinite = do
+  tmp <- getTemporaryDirectory
+  let path = tmp ++ "/hpdf-test-not-finite.pdf"
+      rect = PDFRect 0 0 300 200
+      zero = 0 :: Double
+      doc x = do
+        page <- addPage Nothing
+        -- enough content before the number to fill the buffer of the file
+        drawWithPage page $ mapM_ (\i -> moveto (fromIntegral i :+ 0)) [1 .. 20000 :: Int] >> moveto (x :+ 0)
+      message :: IO a -> IO String
+      message act = (act >> return "") `catch` \e -> return (show (e :: SomeException))
+  mapM_ (\x -> do
+          m <- message (evaluate (BL.length (renderPdf standardDocInfo {compressed = False} rect (doc x))))
+          assertBoolVerbose m ("finite" `elem` words m)
+          w <- message (writePdf path standardDocInfo {compressed = False} rect (doc x))
+          assertBoolVerbose w ("finite" `elem` words w)
+          assertBool . not =<< doesFileExist path)
+        [zero / zero, 1 / zero, -1 / zero]
+  -- a document with finite numbers is written
+  writePdf path standardDocInfo rect (doc 1)
+  assertBool =<< doesFileExist path
+  removeFile path
+
 -- A document without a page is a problem, and not an exception when the
 -- bytes are read.
 test_documentWithoutPage :: IO ()

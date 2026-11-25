@@ -128,6 +128,7 @@ library
       parsec >=3.1.9,
       filepath >= 1.4.0,
       file-embed,
+      directory,
       hyphenation,
       crypton >= 2.2,
       crypton-x509 >= 1.9,

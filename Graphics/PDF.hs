@@ -141,6 +141,9 @@ import Graphics.PDF.Fonts.TrueType
 import Graphics.PDF.Fonts.Encoding (unionEncodings, Encodings(..), PostscriptName)
 import Graphics.PDF.Archive
 import Graphics.PDF.LowLevel.Hash (fnv1a64OffsetBasis, fnv1a64Step)
+import Control.Exception (IOException, catch, onException)
+import System.Directory (removeFile)
+import System.IO (IOMode(WriteMode), hClose, withBinaryFile)
 import Graphics.PDF.LowLevel.Signature (setByteRange)
 import Data.Word (Word64, Word8)
 import Data.List (sortOn)
@@ -728,7 +731,7 @@ writePdf :: String -- ^ Name of the PDF document
          -> IO ()
 writePdf filename infos rect m = case renderPdfE infos rect m of
   Left ps -> ioError (userError (problemsMessage ps))
-  Right bs -> B.writeFile filename bs
+  Right bs -> write_document filename bs
 
 -- | Write a PDF document to a file, running the PDF action in the base
 -- monad @m@ (see 'PDFT')
@@ -743,7 +746,22 @@ writePdfT :: MonadIO m
           -> m ()
 writePdfT filename infos rect m = do
   r <- renderPdfTE infos rect m
-  liftIO (either (ioError . userError . problemsMessage) (B.writeFile filename) r)
+  liftIO (either (ioError . userError . problemsMessage) (write_document filename) r)
+
+-- | Write the bytes of a document to a file. The bytes are evaluated
+-- while they are written, and this can raise an exception (see Note
+-- [Numbers with five decimals] in Graphics.PDF.LowLevel.Serializer): the
+-- file is then removed, so that no incomplete document stays.
+--
+-- The file is removed only if it was opened: if it cannot be opened, a
+-- file that was there before is not touched.
+write_document :: FilePath -> B.ByteString -> IO ()
+write_document path bs =
+  withBinaryFile path WriteMode $ \h ->
+    B.hPut h bs `onException` (hClose h >> (removeFile path `catch` ignore))
+  where
+    ignore :: IOException -> IO ()
+    ignore _ = return ()
 
 {-# DEPRECATED runPdf "Use writePdf" #-}
 runPdf :: String -> PDFDocumentInfo -> PDFRect -> PDF a -> IO ()
