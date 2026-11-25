@@ -6,7 +6,6 @@
 -- Module      :  PDFTree.hs
 -- Copyright   :  (c) Daan Leijen 2002
 -- License     :  BSD-style
--- Maintainer  :  misc@NOSPAMalpheccar.org
 -- Stability   :  provisional
 -- Portability :  portable
 --

@@ -3,7 +3,6 @@
 -- Copyright   : (c) 2006-2016, alpheccar.org
 -- License     : BSD-style
 --
--- Maintainer  : misc@NOSPAMalpheccar.org
 -- Stability   : experimental
 -- Portability : portable
 --
