@@ -136,6 +136,13 @@
      profile, CMYK colours and images with a CMYK profile, gray with each
      profile. A colour, an image, a shading or a pattern in another device
      colour space is a problem of the document.
+   * PNG images, in `Graphics.PDF.Image`: `readPngFile`, `parsePng`,
+     `pngBounds` and `createPDFPng`. All the colour types and numbers of
+     bits of PNG are read, with their transparency (an alpha channel, a
+     palette with alpha values, or one transparent colour). An interlaced
+     image is read if its samples have 8 or 16 bits. The pixels of a file
+     without an alpha channel go to the document as they are, with no
+     decoding. A file that is not a correct PNG file gives `Left`.
 
 ## 1.8
 
