@@ -164,7 +164,9 @@ createStreams = do
       | otherwise = (k,(p,(st,w)))
     -- See Note [Annotations of a PDF/A document]
     pageAnnotations pdfa st = maybe id (const (map (AnyAnnotation . PrintedAnnotation))) pdfa (annots st)
-    addStream pdfa (k,(p,(state',w'))) = do
+    addStream pdfa (k,(p,(state',drawings))) = do
+     -- the drawings in order: see Note [Memory of the drawings] in Graphics.PDF.Document
+     let content = B.concat (reverse drawings)
      -- New reference for the stream
      r <- supply
      -- Run the drawing and get the new state (resource, annotation)
@@ -203,13 +205,13 @@ createStreams = do
      -- We compress only if the stream is not using its own filter
      if (compressed infos) && (not (pdfDictMember (PDFName "Filter") streamDict))
        then do
-         let w''' = compress w'
+         let w''' = compress content
              w'' = fromLazyByteString w'''
          updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w'' True (Left ref) streamDict)
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length w'''))
        else do
-         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream (fromLazyByteString w') False (Left ref) streamDict)
+         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream (fromLazyByteString content) False (Left ref) streamDict)
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length . toLazyByteString $ w'))
 
