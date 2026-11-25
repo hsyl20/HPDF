@@ -50,7 +50,8 @@ import qualified Data.Vector.Unboxed as V
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.Char (chr, isAlphaNum, isAscii, ord)
 import Data.Int (Int16, Int32)
-import Data.List (foldl', sortOn)
+import Data.List (sortOn)
+import qualified Data.List as List (foldl')
 import Control.Monad.Writer (tell)
 import Data.Binary.Builder (fromByteString)
 import Text.Printf (printf)
@@ -469,7 +470,7 @@ widthArray d glyphs = concat [ [AnyPdfObject (PDFInteger g0), AnyPdfObject (map 
 subsetTag :: String -> IS.IntSet -> String
 subsetTag psName glyphs = take 6 (letters h0)
   where
-    h0 = foldl' fnv1a64Step fnv1a64OffsetBasis (map fromIntegral (map ord psName ++ IS.toList glyphs))
+    h0 = List.foldl' fnv1a64Step fnv1a64OffsetBasis (map fromIntegral (map ord psName ++ IS.toList glyphs))
     letters h = chr (ord 'A' + fromIntegral (h `mod` 26)) : letters (h `div` 26)
 
 -- | A CMap from two-byte glyph ids to UTF-16BE, for text extraction, for
@@ -662,7 +663,7 @@ writeSfnt tables0 = patchAdjustment file
       Nothing -> f
 
 checksum :: B.ByteString -> Int
-checksum b = foldl' (\acc i -> (acc + u32 p i) .&. 0xFFFFFFFF) 0 [0, 4 .. B.length p - 4]
+checksum b = List.foldl' (\acc i -> (acc + u32 p i) .&. 0xFFFFFFFF) 0 [0, 4 .. B.length p - 4]
   where p = pad4 b
 
 pad4 :: B.ByteString -> B.ByteString

@@ -50,7 +50,6 @@ import Graphics.PDF.Data.PDFTree(PDFTree,Key)
 import Control.Monad.Writer 
 import Data.Binary.Builder(fromByteString)
 import Graphics.PDF.Fonts.FontTypes(FontData(..))
-import Graphics.PDF.Fonts.Type1 
 import Text.Parsec.Error (ParseError)
 
 -- | Set page annotations
@@ -230,17 +229,17 @@ addOutlines (Just r) = do
 createOutline :: Monad m => PDFReference PDFOutlineEntry -> [Tree OutlineData] -> PDFT m (PDFReference PDFOutlineEntry,PDFReference PDFOutlineEntry)
 createOutline r children = do
     -- Get references for all these outlines
-    refs' <- mapM (const (supply >>= return . Just . PDFReference)) children
+    refs' <- mapM (const (supply >>= return . PDFReference)) children
     -- (previousRef, currentRef, currentNode, nextRef)
-    let refs = zip4 (Nothing : init refs') refs' children (tail refs' ++ [Nothing])
-        current (_,c,_,_) = c
-        Just first = current (head refs)
-        Just end = current (last refs)
-    mapM_ (addEntry first end) refs
-    return (first,end)
+    let justs = map Just refs'
+        refs = zip4 (Nothing : justs) refs' children (drop 1 justs ++ [Nothing])
+    mapM_ addEntry refs
+    case refs' of
+      first : _ -> return (first, last refs')
+      -- 'addOutlines' and 'addEntry' call this function only with children
+      [] -> error "createOutline: an outline level has no entry"
  where
-    addEntry _ _ (_,Nothing,_,_) = error "This pattern match in addEntry should never occur !"
-    addEntry _ _ (prev,Just current,Node (title,col,style,dest) c,next) = do
+    addEntry (prev,current,Node (title,col,style,dest) c,next) = do
         (f,e) <- if (null c) 
             then 
                 return (Nothing,Nothing) 

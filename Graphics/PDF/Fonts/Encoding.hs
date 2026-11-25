@@ -63,7 +63,7 @@ pdfencodings = $(embedFile "Encodings/pdfencodings.txt")
 
 parseMacEncoding :: IO (M.Map PostscriptName GlyphCode)
 parseMacEncoding = do
-    return . M.fromList . mapMaybe (toMacData . C.split '\t') . tail . C.lines $ pdfencodings
+    return . M.fromList . mapMaybe (toMacData . C.split '\t') . drop 1 . C.lines $ pdfencodings
 
 glyphlist :: ByteString
 glyphlist = $(embedFile "Encodings/glyphlist.txt")

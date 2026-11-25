@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE EmptyDataDecls #-}
@@ -308,8 +309,11 @@ pdfDictMember k (PDFDictionary d)  = M.member k d
 supplyName :: Draw String
 supplyName = do
     xs <- gets supplyNames -- infinite list
-    modifyStrict $ \s -> s {supplyNames = tail xs}
-    return (head xs)
+    case xs of
+      x : rest -> do
+        modifyStrict $ \s -> s {supplyNames = rest}
+        return x
+      [] -> error "supplyName: the list of names has no end"
     
 emptyDrawState :: Int -> DrawState
 emptyDrawState ref = 
@@ -339,15 +343,23 @@ pushMatrixStack m = do
     
 popMatrixStack :: Draw ()
 popMatrixStack = do
-    modifyStrict $ \s -> s {matrix = tail (matrix s)}
+    modifyStrict $ \s -> s {matrix = drop 1 (matrix s)}
     
 
 multiplyCurrentMatrixWith :: Matrix -> Draw ()
-multiplyCurrentMatrixWith m' = modifyStrict $ \s -> s {matrix = let (m:l) = matrix s in (m' * m ):l}
+multiplyCurrentMatrixWith m' = modifyStrict $ \s -> s {matrix = multiply_top (matrix s)}
+  where
+    multiply_top (m:l) = (m' * m) : l
+    -- the stack starts with the identity matrix
+    multiply_top [] = [m']
 
     
 currentMatrix :: Draw Matrix
-currentMatrix = gets matrix >>= return . head
+currentMatrix = gets matrix >>= return . top
+  where
+    top (m:_) = m
+    -- the stack starts with the identity matrix
+    top [] = identity
       
 -- | Draw in a new drawing context without perturbing the previous context
 -- that is restored after the draw       
@@ -1071,7 +1083,7 @@ instance
 
 -- ToDo: would be more type-safe with non-empty: NonEmpty (NonEmpty [])
 mapAdjacent :: (a -> a -> b) -> [a] -> [b]
-mapAdjacent f xs = zipWith f xs (tail xs)
+mapAdjacent f xs = zipWith f xs (drop 1 xs)
 
 linearStitched ::
     (ColorTuple a) => a -> [(PDFFloat, a)] -> a -> Function1 Local a e

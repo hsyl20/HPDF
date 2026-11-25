@@ -25,7 +25,7 @@ import Graphics.PDF.Typesetting.Breaking
 import Graphics.PDF.Typesetting.Horizontal(horizontalPostProcess,HBox)
 import Graphics.PDF.Draw
 import Graphics.PDF.Typesetting.Box
-import Data.List(foldl')
+import qualified Data.List as List (foldl')
 import Graphics.PDF.Typesetting.Layout
         
 -- | Default vertical state
@@ -57,7 +57,7 @@ mkVboxWithRatio :: PDFFloat -- ^ Adjustement ratio
                 -> VBox ps s
 mkVboxWithRatio _ [] = error "Cannot make an empty vbox"
 mkVboxWithRatio r l = 
-   let w = foldl' (\x y -> x + glueSizeWithRatio y r) 0.0 l
+   let w = List.foldl' (\x y -> x + glueSizeWithRatio y r) 0.0 l
        h = maximum . map boxHeight $ l
        d = maximum . map boxDescent $ l
        addBox (VGlue gw gh gdelta (Just(y,z)) s) (VBox w' h' d' l' s') = VBox w' h' d' (VGlue (glueSize gw y z r) gh gdelta Nothing s:l') s'

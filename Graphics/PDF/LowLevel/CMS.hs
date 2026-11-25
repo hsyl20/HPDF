@@ -190,7 +190,7 @@ cmsSignature key certs@(cert : _) content =
 -- | Sign bytes with SHA-256: the algorithm identifier and the signature
 sign_bytes :: MonadRandom m => PrivKey -> S.ByteString -> m (Either String (S.ByteString, S.ByteString))
 sign_bytes (PrivKeyRSA k) msg = do
-    r <- RSA.signSafer (Just H.SHA256) k msg
+    r <- RSA.signSaferDigest k (H.hashWith H.SHA256 msg)
     return $ case r of
       Left e -> Left ("the RSA signature failed: " ++ show e)
       Right sig -> Right (der_sequence [oid_rsa, der_null], sig)

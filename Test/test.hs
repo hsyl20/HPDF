@@ -313,7 +313,7 @@ instance Style MyParaStyles where
 
     wordStyle _ = Nothing
     
-    updateStyle (SuperCrazy  f a b) = SuperCrazy f (drop 8 a) (tail b)
+    updateStyle (SuperCrazy  f a b) = SuperCrazy f (drop 8 a) (drop 1 b)
     updateStyle a = a
     
     styleHeight r@(SuperCrazy  _ _ _) = 

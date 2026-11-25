@@ -175,7 +175,7 @@ createStreams = do
          
      -- Pattern NEEDS a resource entry even if empty otherwise don't work with acrobat reader
      -- Image DON'T want a resource entry if empty otherwise don't work with apple reader
-     resources <- if (emptyResource (rsrc state')) && (not (pdfDictMember (PDFName "PatternType") (otherRsrcs state')))
+     streamDict <- if (emptyResource (rsrc state')) && (not (pdfDictMember (PDFName "PatternType") (otherRsrcs state')))
        then do
          case p of
             -- Not linked to a page
@@ -201,15 +201,15 @@ createStreams = do
      infos <- gets docInfo
      -- Resources to add to the stream
      -- We compress only if the stream is not using its own filter
-     if (compressed infos) && (not (pdfDictMember (PDFName "Filter") resources))
+     if (compressed infos) && (not (pdfDictMember (PDFName "Filter") streamDict))
        then do
          let w''' = compress . toLazyByteString $ w'
              w'' = fromLazyByteString w'''
-         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w'' True (Left ref) resources)
+         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w'' True (Left ref) streamDict)
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length w'''))
        else do
-         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w' False (Left ref) resources)
+         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w' False (Left ref) streamDict)
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length . toLazyByteString $ w'))
 
@@ -521,7 +521,7 @@ documentId bytes = S.pack (word64Bytes (fnv fnv1a64OffsetBasis) ++ word64Bytes (
 writeObjectsAndCreateToc :: [Builder] -- ^ List of objects each object being already converted to a bytestring
                           -> (Int,Int64,[Builder])
 writeObjectsAndCreateToc l = 
-   let lengths =  tail . scanl (\len obj -> len + (B.length . toLazyByteString $ obj)) 0 $ l
+   let lengths =  drop 1 . scanl (\len obj -> len + (B.length . toLazyByteString $ obj)) 0 $ l
        createEntry x = serialize $ (printf "%010d 00000 n \n" ((fromIntegral x)::Integer) :: String)
        entries = map createEntry (init lengths) 
    in
@@ -531,7 +531,7 @@ writeObjectsAndCreateToc l =
 generateStreams :: PDFReference PDFCatalog -> TrailerInfo -> Int -> Int64 -> [Builder]
                 -> [Builder] -> B.ByteString
 generateStreams root di !nb !totalLen ens [] = 
-  let entries = reverse (tail ens)  
+  let entries = reverse (drop 1 ens)  
   in
   toLazyByteString $ mconcat $ [ serialize "xref\n"
                                , serialize $ "0 " ++ show nb ++ "\n"
@@ -638,12 +638,14 @@ renderDocument root info s =
             Nothing -> serialize "%PDF-1.5\n"
           objectEncoding (x,a) = toPDF . PDFReferencedObject (fromIntegral $! x) $ a
           objs = objects s
-          encodeAnObject im k =
-            let Just o = IM.lookup k im
-                mim = do
-                    (l, PDFReference ref) <- pdfLengthInfo o
-                    return $ IM.insert ref (AnyPdfObject (KnownLength l)) im
-            in (fromMaybe im mim, objectEncoding (k,o))
+          encodeAnObject im k = case IM.lookup k im of
+            -- 'k' is a key of 'objs', and no object is removed
+            Nothing -> (im, mempty)
+            Just o ->
+              let mim = do
+                      (l, PDFReference ref) <- pdfLengthInfo o
+                      return $ IM.insert ref (AnyPdfObject (KnownLength l)) im
+              in (fromMaybe im mim, objectEncoding (k,o))
 
           encodedObjects = snd $ mapAccumL encodeAnObject objs (IM.keys objs)
           objectContents = header : encodedObjects

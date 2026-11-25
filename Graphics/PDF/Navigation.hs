@@ -28,7 +28,9 @@ import qualified Data.Text as T
 
 -- | True if we are adding the first outline to this level
 isFirst :: [Bool] -> Bool
-isFirst r = head r
+isFirst (x:_) = x
+-- there is always one level: see 'firstOutline'
+isFirst [] = True
   
 -- | Start a new outline level  
 startNew :: Monad m => PDFT m ()
@@ -36,14 +38,14 @@ startNew = modifyStrict $ \s -> s{firstOutline = True:(firstOutline s)}
 
 -- | We remember there are outlines at this level
 addedOutline :: Monad m => PDFT m ()
-addedOutline = modifyStrict $ \s -> s{firstOutline = False:tail (firstOutline s)}
+addedOutline = modifyStrict $ \s -> s{firstOutline = False:drop 1 (firstOutline s)}
 
 -- | Close an outline level
 closeNew :: Monad m => PDFT m ()
 closeNew = do
     r <- gets firstOutline
     when (not (isFirst r)) $ moveToParent
-    modifyStrict $ \s -> s{firstOutline = tail (firstOutline s)}
+    modifyStrict $ \s -> s{firstOutline = drop 1 (firstOutline s)}
 
 -- | Create a new outline section pointing to the last created page
 newSection :: Monad m => T.Text -- ^ Outline title

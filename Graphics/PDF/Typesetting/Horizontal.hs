@@ -28,7 +28,7 @@ import Graphics.PDF.Coordinates
 import qualified Data.ByteString as S(ByteString,reverse)
 import Graphics.PDF.Fonts.Font(IsFont(..),encodeGlyphs)
 import Data.Maybe(isJust,fromJust)
-import Data.List(foldl')
+import qualified Data.List as List (foldl')
 import Graphics.PDF.Colors
 import Graphics.PDF.Text
 import Graphics.PDF.Typesetting.Box
@@ -118,7 +118,7 @@ mkHboxWithRatio :: Style s => PDFFloat -- ^ Adjustement ratio
                 -> HBox s
 mkHboxWithRatio _ [] = error "Cannot create an empty horizontal box"
 mkHboxWithRatio r l = 
-    let w = foldl' (\x y -> x + glueSizeWithRatio y r) 0.0 l
+    let w = List.foldl' (\x y -> x + glueSizeWithRatio y r) 0.0 l
         --h = maximum . map boxHeight $ l
         ascent = maximum . map boxAscent $ l
         d = maximum . map boxDescent $ l
@@ -218,7 +218,7 @@ startDrawingNewLineOfText hl dl l x y style =
            -- Position of draw line based upon the whole line and not just this word
        let y' = y - hl + dl
            (l',l'') = span (isSameStyle style) l
-           w' = foldl' (\x' ny -> x' + boxWidth ny) 0.0 l'
+           w' = List.foldl' (\x' ny -> x' + boxWidth ny) 0.0 l'
        if (isJust . sentenceStyle $ style)
              then do
                  (fromJust . sentenceStyle $ style) (Rectangle (x :+ (y - hl)) ((x+w') :+ y)) (drawTextLine style l' x y')
