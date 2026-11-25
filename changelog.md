@@ -105,8 +105,9 @@
      a value that is known only after it (for example the total number of
      pages).
    * Faster rendering: real numbers and hexadecimal strings are no longer
-     written with `printf`. A document of text and shapes is rendered in
-     less than half the time.
+     written with `printf`, and the text monad is one function of its
+     state. A document of text and shapes is rendered in less than half
+     the time.
    * Real numbers are written in another form. The values are the same,
      but the bytes of almost all documents change:
        - a number has five decimals at most, and no zeros at the end:
