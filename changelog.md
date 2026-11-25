@@ -119,6 +119,10 @@
          of the number: for example 0.000005 was written `0.00000` and is
          now `0.00001`. This occurs only for a number whose shortest
          digits end with a 5 at the sixth decimal.
+   * A number that is not finite (NaN, Infinity) in a drawing is an error:
+     the rendering raises an exception, and `writePdf` leaves no file.
+     Before, "NaN" or "Infinity" was written in the document, which is
+     not a PDF number. The library now depends on `directory`.
 
 ## 1.8
 

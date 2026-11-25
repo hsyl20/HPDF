@@ -112,8 +112,14 @@ instance SerializeValue BU.Builder Double where
 --   0.000005      exact value 0.00000500000000000000040901...
 --                 printf of Haskell: 0.00000      'realNumber': 0.00001
 --
--- A number that is not finite cannot be in a PDF document. 'realNumber'
--- writes it as 'show' does, as before.
+-- A number that is not finite (NaN, Infinity) cannot be in a PDF document,
+-- and it shows an error of the program that made the drawing. 'realNumber'
+-- calls 'error' for it. HPDF 1.8 wrote "NaN" or "Infinity", which is not a
+-- PDF number: a reader stopped the drawing of the page at this point,
+-- with no message for the author of the document.
+--
+-- The exception is raised when the bytes of the document are read. Thus
+-- 'Graphics.PDF.writePdf' removes the file that it was writing.
 
 -- | A real number with five decimals at most.
 -- See Note [Numbers with five decimals]
@@ -121,7 +127,7 @@ realNumber :: Double -> BU.Builder
 realNumber x
     | a < 10000 && abs (frac - 0.5) > 1.0e-5 =
         BP.primBounded real_number_prim (x < 0, if frac > 0.5 then whole + 1 else whole)
-    | isNaN x || isInfinite x = BB.string7 (show x)
+    | isNaN x || isInfinite x = error ("HPDF: a number that is not finite cannot be written in a PDF document: " ++ show x)
     | otherwise = exact_real_number (x < 0) a
   where
     a = abs x
