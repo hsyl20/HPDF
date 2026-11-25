@@ -94,6 +94,7 @@ $ cabal run HPDF-demo
 $ open demo.pdf
 $ cabal run HPDF-Unicode-Demo  # writes unicode.pdf
 $ cabal run HPDF-PDFA-Demo     # writes pdfa.pdf
+$ cabal run HPDF-Sign-Demo -- key.pem certificates.pem  # writes signed.pdf
 ```
 
 The TrueType tests and the two demos look for DejaVu Sans or Noto Sans in

@@ -20,7 +20,6 @@ description:
   folder. That file is giving an example of each feature.
 extra-source-files:
   Test/logo.jpg
-  Test/Makefile
   Test/Penrose.hs
   Test/test.hs
   Test/unicode.hs
