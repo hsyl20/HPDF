@@ -244,7 +244,7 @@ instance MonadState DrawState Draw where
     put st = Draw $ \env -> writeSTRef (drawStateRef env) st
 
 instance MonadWriter BU.Builder Draw where
-    tell bu  = Draw $ \env -> modifySTRef (builderRef env) (`mappend` bu)
+    tell bu  = Draw $ \env -> modifySTRef' (builderRef env) (`mappend` bu)
     listen m = Draw $ \env -> do
                  a <- unDraw m env
                  w <- readSTRef (builderRef env)

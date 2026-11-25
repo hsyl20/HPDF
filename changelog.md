@@ -104,6 +104,20 @@
      `drawWithPage`. `drawWithPage` stays lazy, so that a drawing can use
      a value that is known only after it (for example the total number of
      pages).
+   * Faster rendering: real numbers and hexadecimal strings are no longer
+     written with `printf`. A document of text and shapes is rendered in
+     less than half the time.
+   * Real numbers are written in another form. The values are the same,
+     but the bytes of almost all documents change:
+       - a number has five decimals at most, and no zeros at the end:
+         `12.5` and `3`, where it was `12.50000` and `3.00000`. A document
+         is smaller (`demo.pdf`: 5% smaller);
+       - the number that is written is the nearest to the exact value,
+         with the even last digit on a tie, as the `printf` of C does.
+         Before, `printf` of Haskell rounded the shortest decimal digits
+         of the number: for example 0.000005 was written `0.00000` and is
+         now `0.00001`. This occurs only for a number whose shortest
+         digits end with a 5 at the sixth decimal.
 
 ## 1.8
 
