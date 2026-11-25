@@ -129,7 +129,7 @@ import Graphics.PDF.Document hiding (createPDFXFormExtra)
 import Codec.Compression.Zlib
 import Graphics.PDF.Action
 import Graphics.PDF.Image
-import Graphics.PDF.Resources(emptyResource)
+import Graphics.PDF.Resources(emptyResource, PDFResource(..))
 import Data.Binary.Builder(Builder,fromLazyByteString, toLazyByteString)
 import Graphics.PDF.LowLevel.Serializer
 import Data.List(intercalate, mapAccumL)
@@ -187,7 +187,7 @@ createStreams = do
                  return emptyDictionary
        -- Some resource are needed by the stream
        else do
-         rsrcRef <- addObject (rsrc state')
+         rsrcRef <- indirectFonts (rsrc state') >>= addObject
          case p of
              -- Not linked to a page
              Nothing -> do                  
@@ -212,6 +212,45 @@ createStreams = do
          updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w' False (Left ref) resources)
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length . toLazyByteString $ w'))
+
+-- Note [Font dictionaries are indirect objects]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- A standard font or a Type 1 font gives its font dictionary as its
+-- resource ('toRsrc'), because these fonts can be made before the document
+-- has objects. If this dictionary was written in the resource dictionary
+-- of each stream that uses the font, the document would contain it one
+-- time for each stream:
+--
+--   /Font << /Courier << /BaseFont /Courier ... >> >>      not written
+--   /Font << /Courier 4 0 R >>                             written
+--
+-- Thus each different font dictionary is written one time as an object,
+-- and the resource dictionaries refer to it. Some tools also expect this:
+-- pdffonts (poppler) reports an internal error for a font dictionary that
+-- is not an indirect object.
+
+-- | Replace the font dictionaries of a resource dictionary by references.
+-- See Note [Font dictionaries are indirect objects]
+indirectFonts :: Monad m => PDFResource -> PDFT m PDFResource
+indirectFonts r = case M.lookup font_key (resources r) of
+    Nothing -> return r
+    Just (PDFDictionary fonts) -> do
+      fonts' <- mapM indirect fonts
+      return r {resources = M.insert font_key (PDFDictionary fonts') (resources r)}
+  where
+    font_key = PDFName "Font"
+    indirect obj = do
+      let bytes = toLazyByteString (toPDF obj)
+      if not (LC.pack "<<" `B.isPrefixOf` bytes)
+        then return obj
+        else do
+          known <- gets fontObjects
+          case M.lookup bytes known of
+            Just n -> return (AnyPdfObject (PDFReference n :: PDFReference PDFDictionary))
+            Nothing -> do
+              PDFReference n <- addObject obj
+              modifyStrict $ \s -> s {fontObjects = M.insert bytes n (fontObjects s)}
+              return (AnyPdfObject (PDFReference n :: PDFReference PDFDictionary))
 
 -- Note [Annotations of a PDF/A document]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -513,6 +552,7 @@ defaultPdfSettings =
            , xobjectBound = IM.empty
            , firstOutline = [True]
            , fontFinalizers = []
+           , fontObjects = M.empty
            , pdfaSettings = Nothing
            , associatedFiles = []
            , documentProblems = []

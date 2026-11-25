@@ -476,6 +476,7 @@ data PdfBuilder = PdfBuilder { supplySrc :: !Int -- ^ Supply of unique identifie
                          , xobjectBound :: !(IM.IntMap (PDFFloat,PDFFloat)) -- ^ Width and height of xobjects
                          , firstOutline :: [Bool] -- ^ Used to improve the outline API
                          , fontFinalizers :: [M.Map String IS.IntSet -> PDF ()] -- ^ Run when the document is saved, with the glyph ids every stream used per font name (font subsetting)
+                         , fontObjects :: M.Map B.ByteString Int -- ^ Font dictionaries that are written as objects. See Note [Font dictionaries are indirect objects] in Graphics.PDF
                          , pdfaSettings :: Maybe PDFA -- ^ Write the document as PDF/A (see "Graphics.PDF.Archive")
                          , associatedFiles :: [(T.Text, String, PDFReference PDFDictionary)] -- ^ Embedded files: name, MIME type and file specification, most recent first
                          , documentProblems :: [String] -- ^ Why the document does not conform to what was asked of it (PDF/A), found when it is saved
