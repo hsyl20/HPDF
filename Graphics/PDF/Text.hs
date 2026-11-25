@@ -1,6 +1,6 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE UnboxedTuples #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 ---------------------------------------------------------
 -- |
 -- Copyright   : (c) 2006-2016, alpheccar.org
@@ -99,15 +99,49 @@ defaultParameters = TextParameter 0 0 100 0 0 (Set.empty) Nothing M.empty
 
      
 -- | The text monad 
-newtype PDFText a = PDFText {unText :: WriterT Builder (State TextParameter) a}          
-#ifndef __HADDOCK__                    
-  deriving(Monad,Applicative,Functor,MonadWriter Builder,MonadState TextParameter)
-#else
-instance Monad PDFText
-instance Functor PDFText
-instance MonadWriter Builder PDFText
-instance MonadState TextParameter PDFText
-#endif
+--
+-- It has the text parameters as a state, and it writes the operators to a
+-- builder.
+-- See Note [The text monad]
+newtype PDFText a = PDFText {unText :: TextParameter -> Builder -> (# a, TextParameter, Builder #)}
+
+-- Note [The text monad]
+-- ~~~~~~~~~~~~~~~~~~~~~
+-- 'PDFText' was @WriterT Builder (State TextParameter)@. Each operator
+-- of a text object goes through the two layers, and a line of text has
+-- hundreds of operators. 'PDFText' is now one function of the state and
+-- of the builder, which returns the two with the result in an unboxed
+-- tuple. This is 10 to 15% of the time of a document of text.
+--
+-- The function is not marked as one-shot (GHC.Exts.oneShot), although
+-- GHC does this for its own monads: an action of HPDF is a value that can
+-- run many times (an operator in a loop). The mark gave no gain here, and
+-- it made the 'Draw' monad three times slower.
+
+instance Functor PDFText where
+    fmap f m = PDFText $ \s w -> case unText m s w of
+      (# a, s', w' #) -> (# f a, s', w' #)
+
+instance Applicative PDFText where
+    pure a = PDFText $ \s w -> (# a, s, w #)
+    mf <*> ma = PDFText $ \s w -> case unText mf s w of
+      (# f, s', w' #) -> case unText ma s' w' of
+        (# a, s'', w'' #) -> (# f a, s'', w'' #)
+
+instance Monad PDFText where
+    m >>= k = PDFText $ \s w -> case unText m s w of
+      (# a, s', w' #) -> unText (k a) s' w'
+
+instance MonadState TextParameter PDFText where
+    get = PDFText $ \s w -> (# s, s, w #)
+    put s = PDFText $ \_ w -> (# (), s, w #)
+
+instance MonadWriter Builder PDFText where
+    tell b = PDFText $ \s w -> let !w' = w `mappend` b in (# (), s, w' #)
+    listen m = PDFText $ \s w -> case unText m s mempty of
+      (# a, s', w' #) -> (# (a, w'), s', w `mappend` w' #)
+    pass m = PDFText $ \s w -> case unText m s mempty of
+      (# (a, f), s', w' #) -> (# a, s', w `mappend` f w' #)
     
 instance MonadPath PDFText
 
@@ -127,8 +161,8 @@ data TextMode = FillText
 
 -- | Select a font to use
 setFont :: PDFFont -> PDFText ()
-setFont f@(PDFFont n size) = PDFText $ do
-    lift (modifyStrict $ \s -> s {fontState = Set.insert n (fontState s), currentFont = Just f})
+setFont f@(PDFFont n size) = do
+    (modifyStrict $ \s -> s {fontState = Set.insert n (fontState s), currentFont = Just f})
     tell . mconcat$ [ serialize "\n/" 
                     , serialize (name n)
                     , serialize ' '
@@ -156,7 +190,8 @@ drawText :: PDFText a
 drawText t = do
     -- See Note [Font of a text object]
     inherited <- gets streamFont
-    let ((a,w),s) = (runState . runWriterT . unText $ t) defaultParameters {currentFont = inherited}
+    let (a,w,s) = case unText t defaultParameters {currentFont = inherited} mempty of
+          (# a', s', w' #) -> (a', w', s')
     modifyStrict $ \st -> st { streamFont = currentFont s }
     mapM_ addFontRsrc (Set.elems (fontState s))
     unless (M.null (glyphsShown s)) $ modifyStrict $ \st ->
@@ -198,7 +233,7 @@ glyph c = PDFGlyph . S.singleton $ (fromIntegral c)
 recordGlyphs :: PDFFont -> PDFGlyph -> PDFText ()
 recordGlyphs (PDFFont f _) (PDFGlyph t)
   | glyphCodeBytes f == 1 = return ()
-  | otherwise = PDFText . lift . modifyStrict $ \s ->
+  | otherwise = modifyStrict $ \s ->
       s { glyphsShown = M.insertWith IS.union (name f) gs (glyphsShown s) }
   where
     gs = IS.fromList [fromIntegral g | g <- decodeGlyphs f t]
@@ -245,8 +280,8 @@ startNewLine = tell . serialize $ "\nT*"
 
 -- | Set leading value
 leading :: UnscaledUnit -> PDFText ()
-leading v = PDFText $ do
-    lift (modifyStrict $ \s -> s {tl = v})
+leading v = do
+    (modifyStrict $ \s -> s {tl = v})
     tell . mconcat $  [ serialize '\n'
                       , toPDF v
                       , serialize " TL"
@@ -254,8 +289,8 @@ leading v = PDFText $ do
 
 -- | Set the additional char space
 charSpace :: UnscaledUnit -> PDFText ()
-charSpace v = PDFText $ do
-    lift (modifyStrict $ \s -> s {tc = v})
+charSpace v = do
+    (modifyStrict $ \s -> s {tc = v})
     tell . mconcat  $ [ serialize '\n'
                       , toPDF v
                       , serialize " Tc"
@@ -266,8 +301,8 @@ charSpace v = PDFText $ do
 -- A PDF reader adds this space to the one-byte character code 32 only. Thus
 -- it has no effect with a two-byte font ("Graphics.PDF.Fonts.TrueType").
 wordSpace :: UnscaledUnit -> PDFText ()
-wordSpace v = PDFText $ do
-    lift (modifyStrict $ \s -> s {tw = v})
+wordSpace v = do
+    (modifyStrict $ \s -> s {tw = v})
     tell . mconcat $ [ serialize '\n'
                       , toPDF v
                       , serialize " Tw"
@@ -275,8 +310,8 @@ wordSpace v = PDFText $ do
 
 -- | Set scaling factor for text
 textScale :: PDFFloat -> PDFText ()
-textScale v = PDFText $ do
-    lift (modifyStrict $ \s -> s {tz = v})
+textScale v = do
+    (modifyStrict $ \s -> s {tz = v})
     tell . mconcat  $ [ serialize '\n'
                       , toPDF v
                       , serialize " Tz"
@@ -292,8 +327,8 @@ renderMode v =
 
 -- | Set the rise value
 rise :: UnscaledUnit -> PDFText ()
-rise v = PDFText $ do
-    lift (modifyStrict $ \s -> s {ts = v})
+rise v = do
+    (modifyStrict $ \s -> s {ts = v})
     tell . mconcat $  [ serialize '\n'
                       , toPDF v
                       , serialize " Ts"
