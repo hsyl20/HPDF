@@ -121,17 +121,8 @@ displayFormattedText :: (ParagraphStyle ps s) => Rectangle -- ^ Text area
                      -> s -- ^ Default horizontal style
                      -> TM ps s a -- ^ Typesetting monad
                      -> Draw a -- ^ Draw monad
-displayFormattedText (Rectangle (xa :+ ya) (xb :+ yb)) defaultVStyle defaultHStyle t  = 
-    do
-    --withNewContext $ do
-    --    addShape $ Rectangle (xa-1) y' (xb+1) y''
-    --    closePath
-    --    setAsClipPath
-        let (a, s', boxes) = (runRWS . unTM $ t >>= \x' -> do {return x'} ) () (defaultTmState defaultVStyle defaultHStyle)
-            c = mkContainer xa yb (xb-xa) (yb-ya) 0
-            (d,_,_) = fillContainer (pageSettings s') c boxes
-        d
-        return a
+displayFormattedText rect defaultVStyle defaultHStyle t =
+    fst <$> displayFormattedTextIn [rect] defaultVStyle defaultHStyle t
 
 -- Note [Text in more than one rectangle]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
