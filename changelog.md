@@ -17,6 +17,13 @@
    * Fix custom Type 1 fonts that PDF readers embedded but did not use:
      write a valid font descriptor, an encoding with the glyph names, and the
      font file without the PFB segment headers (#24)
+   * AFM files (#9): the parser now reads the files that font tools write
+     (glyph names with `_`, `.` or `-`, real numbers, CR LF line ends,
+     ligature and other fields, missing `EndFontMetrics`). A file that is
+     not an AFM file gives `Left`, never an exception. A glyph named
+     `uniXXXX` or `uXXXX[XX]` gives its Unicode character when the encoding
+     does not name it. A `space` or `hyphen` glyph without a character code
+     is not used.
    * Embedded TrueType fonts with Unicode text, `Graphics.PDF.Fonts.TrueType`:
      `readTrueTypeFont` and `mkTrueTypeFont` write a Type0 font over a
      CIDFontType2 with the Identity-H encoding, the font program as
