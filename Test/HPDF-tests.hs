@@ -664,6 +664,51 @@ test_sectionResult = do
     liftIO (writeIORef ref (a, b))
   readIORef ref >>= assertEqual (1, 2)
 
+-- A page can be drawn in more than one step: the content is in the order
+-- of the drawings, also for a page with many drawings.
+-- See Note [Memory of the drawings] in Graphics.PDF.Document
+test_pageDrawnInSteps :: IO ()
+test_pageDrawnInSteps = do
+  let steps = 3000 :: Int
+      pdf = BL.toStrict $ renderPdf standardDocInfo {compressed = False} (PDFRect 0 0 300 200) $ do
+        first <- addPage Nothing
+        second <- addPage Nothing
+        mapM_ (\i -> drawWithPage (if even i then first else second) (moveto (fromIntegral i :+ 0))) [1 .. steps]
+      moves = [ fst n | l <- C.lines pdf, [x, _, m] <- [C.words l], m == C.pack "m", Just n <- [C.readInt x] ]
+  -- the two pages are two streams: the odd steps and the even steps, each in order
+  assertEqual steps (length moves)
+  assertEqual ([2, 4 .. steps] ++ [1, 3 .. steps]) moves
+
+-- 'drawWithPage' is lazy: a drawing can use a value that is known only
+-- after it, here the total number of pages. 'drawWithPage'' evaluates the
+-- drawing immediately, and writes the same content.
+-- See Note [Memory of the drawings] in Graphics.PDF.Document
+test_lazyAndStrictDrawings :: IO ()
+test_lazyAndStrictDrawings = do
+  let rect = PDFRect 0 0 300 200
+      -- each page shows its number and the total, and says if a page follows
+      pagesWith :: Int -> Int -> PDF Int
+      pagesWith total k = do
+        page <- addPage Nothing
+        more <- drawWithPage page $ do
+          moveto (fromIntegral k :+ fromIntegral total)
+          return (k < 3)
+        if more then pagesWith total (k + 1) else return k
+      -- the total is the result of the document that uses it
+      (n, builder) = stepPDF (pagesWith n 1) (emptyPdfBuilder standardDocInfo {compressed = False} rect)
+      lazyPdf = BL.toStrict (buildPdf builder)
+      number t = read (C.unpack t) :: Double
+      marks pdf = [ (number a, number b) | l <- C.lines pdf, [a, b, m] <- [C.words l], m == C.pack "m" ]
+  assertEqual 3 n
+  assertEqual [(1, 3), (2, 3), (3, 3)] (marks lazyPdf)
+  -- the same document with the strict function, when the total is known
+  let strictPdf = BL.toStrict $ renderPdf standardDocInfo {compressed = False} rect $
+        mapM_ (\k -> addPage Nothing >>= \page -> drawWithPage' page (moveto (fromIntegral k :+ 3))) [1 :: Int, 2, 3]
+  assertEqual lazyPdf strictPdf
+  -- the strict function gives the result of the drawing
+  let (r, _) = stepPDF (addPage Nothing >>= \page -> drawWithPage' page (return (42 :: Int))) (emptyPdfBuilder standardDocInfo rect)
+  assertEqual 42 r
+
 -- A document without a page is a problem, and not an exception when the
 -- bytes are read.
 test_documentWithoutPage :: IO ()

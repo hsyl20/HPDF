@@ -18,6 +18,7 @@ module Graphics.PDF.Document(
  , addPage
  , addPageWithTransition
  , drawWithPage
+ , drawWithPage'
  , createPDFXForm
  , createPDFXFormExtra
  -- ** Page transitions
@@ -133,33 +134,66 @@ addPageWithTransition rect' dur t = do
 -- Note [Memory of the drawings]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 -- The content of a page is compressed and written when the document is
--- rendered. Until then, the document keeps the content of each page.
+-- rendered. Until then, the document keeps the drawings of each page.
 --
--- If the document kept the drawing as a computation that is not evaluated,
--- it would keep all the data that the drawing refers to: the text, the
--- typesetting boxes, the closures of the 'Draw' monad. This is many times
--- the size of the content. Thus 'drawWithPage' evaluates the drawing to
--- bytes immediately, and the document keeps only these bytes.
+-- 'drawWithPage' is lazy: it keeps a drawing as a computation that is not
+-- evaluated. Thus a drawing can use a value that is known only after it,
+-- for example the total number of pages:
 --
--- The bytes are a lazy ByteString, which is a list of chunks (arrays of
--- bytes):
+--   go k = do
+--     page <- addPage Nothing
+--     more <- drawWithPage page (pageContent k total)   -- uses total
+--     if more then go (k + 1) else return k
+--   (total, builder) = stepPDF (go 1) (emptyPdfBuilder info rect)
 --
--- * 'toLazyByteString' runs the builder of the drawing one time, and
---   writes the bytes in chunks of 32 KB at most.
--- * A second drawing on the same page adds its chunks to the list. No
---   byte is copied.
--- * When the document is rendered, the chunks go to zlib, or to the
---   output if the document is not compressed.
+-- The cost is memory. A drawing that is not evaluated keeps all the data
+-- that it refers to: the text, the typesetting boxes, the closures of the
+-- 'Draw' monad. This is many times the size of its content.
 --
--- Example: a document of 300 pages of text, 750 KB when it is written,
--- needed 396 MiB of memory with the drawings not evaluated, and needs
--- 58 MiB with the bytes.
+-- 'drawWithPage'' is strict: it evaluates the drawing to bytes
+-- immediately, and the document keeps only these bytes. A document of 300
+-- pages of text (750 KB when it is written) needs 320 MiB of memory with
+-- 'drawWithPage', and 58 MiB with 'drawWithPage''. The example
+-- above fails with @<<loop>>@ if it uses 'drawWithPage''.
+--
+-- In the two cases, a stream has the list of its drawings, the last one
+-- first. Each drawing is a lazy ByteString (a list of chunks):
+--
+-- * A second drawing on the same page is added at the head of the list.
+--   This does not depend on the number of drawings that the page has.
+--   (An append of two lazy ByteStrings walks the chunks of the first one:
+--   a page with n drawings would need n * n steps.)
+-- * When the document is rendered, the drawings are put in order one
+--   time, and their chunks go to zlib, or to the output if the document
+--   is not compressed.
 
--- | Draw on a given page
+-- | Draw on a given page.
+--
+-- The drawing is lazy: it is evaluated when the document is rendered. For
+-- a document with many pages, 'drawWithPage'' needs much less memory.
 drawWithPage :: Monad m => PDFReference PDFPage -- ^ Page
             -> Draw a -- ^ Drawing commands
             -> PDFT m a
-drawWithPage page draw = do
+drawWithPage = draw_with_page False
+
+-- | Draw on a given page, and evaluate the drawing immediately.
+--
+-- The document then keeps the bytes of the drawing, and not the drawing
+-- with all the data that it refers to. Use it for a document with many
+-- pages. The drawing cannot use a value that is known only after it.
+--
+-- See Note [Memory of the drawings]
+drawWithPage' :: Monad m => PDFReference PDFPage -- ^ Page
+             -> Draw a -- ^ Drawing commands
+             -> PDFT m a
+drawWithPage' = draw_with_page True
+
+-- | See Note [Memory of the drawings]
+draw_with_page :: Monad m => Bool -- ^ Evaluate the drawing immediately
+               -> PDFReference PDFPage
+               -> Draw a
+               -> PDFT m a
+draw_with_page strict page draw = do
      -- Get the page dictionary
      lPages <- gets pages
      -- Get the stream dictionary
@@ -174,13 +208,17 @@ drawWithPage page draw = do
           case theContent of
             Nothing -> error "Can't find a content for the page to draw on it"
             -- If the stream is found
-            Just (_,(oldState,oldContent)) -> do
+            Just (_,(oldState,oldDrawings)) -> do
               -- Create a new cntent and update the stream
               myBounds <- gets xobjectBound
-              -- See Note [Memory of the drawings]
-              let !(a,!state',w') = runDrawing draw (emptyEnvironment {streamId = streamRef, xobjectBoundD = myBounds}) oldState
+              let (a,state',w') = runDrawing draw (emptyEnvironment {streamId = streamRef, xobjectBoundD = myBounds}) oldState
                   content = toLazyByteString w'
+                  update = modifyStrict $ \s -> s {streams = IM.insert streamRef (Just page,(state',content : oldDrawings)) lStreams}
+              if strict
+                then do
                   -- the length is known when all the chunks are evaluated
-                  !_size = B.length content
-              modifyStrict $ \s -> s {streams = IM.insert streamRef (Just page,(state',oldContent `B.append` content)) lStreams}
+                  let !_state = state'
+                      !_size = B.length content
+                  update
+                else update
               return a

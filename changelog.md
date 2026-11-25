@@ -97,10 +97,13 @@
    * Text in more than one rectangle (#6): `displayFormattedTextIn` and
      `displayBoxes` fill a list of rectangles in order and return the boxes
      that did not fit.
-   * Less memory to build a large document: the content of a page is
-     evaluated to bytes when it is drawn, and no longer kept as a
-     computation until the document is rendered. A document of 300 pages
-     of text needs 58 MiB and no longer 396 MiB. The output is the same.
+   * Add `drawWithPage'`, a strict `drawWithPage`: it evaluates the drawing
+     to bytes immediately, and the document does not keep the drawing with
+     the data that it refers to. Use it for a document with many pages: a
+     document of 300 pages of text needs 58 MiB with it, and 320 MiB with
+     `drawWithPage`. `drawWithPage` stays lazy, so that a drawing can use
+     a value that is known only after it (for example the total number of
+     pages).
 
 ## 1.8
 

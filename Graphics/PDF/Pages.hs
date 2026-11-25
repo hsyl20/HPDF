@@ -1,4 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
 ---------------------------------------------------------
 -- |
 -- Copyright   : (c) 2006-2016, alpheccar.org
@@ -50,7 +49,6 @@ import Graphics.PDF.Fonts.Font
 import Graphics.PDF.Data.PDFTree(PDFTree,Key)
 import Control.Monad.Writer 
 import Data.Binary.Builder(fromByteString, toLazyByteString)
-import qualified Data.ByteString.Lazy as B
 import Graphics.PDF.Fonts.FontTypes(FontData(..))
 import Text.Parsec.Error (ParseError)
 
@@ -89,12 +87,10 @@ createContent d page = do
   -- Create a new stream referenbce
   streamref <- supply
   myBounds <- gets xobjectBound
+  -- The drawing is not evaluated here.
   -- See Note [Memory of the drawings] in Graphics.PDF.Document
-  let !(_,!state',w') = runDrawing d (emptyEnvironment {streamId = streamref, xobjectBoundD = myBounds}) (emptyDrawState streamref)
-      content = toLazyByteString w'
-      -- the length is known when all the chunks are evaluated
-      !_size = B.length content
-  modifyStrict $ \s -> s {streams = IM.insert streamref (page,(state',content)) (streams s)}
+  let (_,state',w') = runDrawing d (emptyEnvironment {streamId = streamref, xobjectBoundD = myBounds}) (emptyDrawState streamref)
+  modifyStrict $ \s -> s {streams = IM.insert streamref (page,(state',[toLazyByteString w'])) (streams s)}
   return (PDFReference streamref)
 
 -- | Returns a new unique identifier

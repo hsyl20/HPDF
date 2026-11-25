@@ -478,7 +478,7 @@ data PDFCatalog = PDFCatalog
 data PdfBuilder = PdfBuilder { supplySrc :: !Int -- ^ Supply of unique identifiers
                          , objects :: !(IM.IntMap AnyPdfObject) -- ^ Dictionary of PDF objects
                          , pages :: !Pages -- ^ Pages
-                         , streams :: !(IM.IntMap ((Maybe (PDFReference PDFPage)),(DrawState,B.ByteString))) -- ^ Content of the streams. See Note [Memory of the drawings] in Graphics.PDF.Document
+                         , streams :: !(IM.IntMap ((Maybe (PDFReference PDFPage)),(DrawState,[B.ByteString]))) -- ^ Content of the streams: the bytes of each drawing, the last drawing first. See Note [Memory of the drawings] in Graphics.PDF.Document
                          , catalog :: !(PDFReference PDFCatalog) -- ^ Reference to the PDF catalog
                          , defaultRect :: !PDFRect -- ^ Default page size
                          , docInfo :: !PDFDocumentInfo -- ^ Document infos
