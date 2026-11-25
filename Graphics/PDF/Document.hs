@@ -9,6 +9,7 @@
 -- Management of the PDF structure
 ---------------------------------------------------------
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE BangPatterns #-}
 module Graphics.PDF.Document(
  -- * Document actions
  -- ** Special document objects
@@ -52,6 +53,8 @@ import Graphics.PDF.Pages
 import Graphics.PDF.Shapes (Rectangle(Rectangle))
 import Control.Monad.State
 import qualified Data.IntMap as IM
+import qualified Data.ByteString.Lazy as B
+import Data.Binary.Builder (toLazyByteString)
 import qualified Data.Text as T
 import Data.Complex (Complex((:+)))
 
@@ -127,6 +130,31 @@ addPageWithTransition rect' dur t = do
     return pageref
 
         
+-- Note [Memory of the drawings]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The content of a page is compressed and written when the document is
+-- rendered. Until then, the document keeps the content of each page.
+--
+-- If the document kept the drawing as a computation that is not evaluated,
+-- it would keep all the data that the drawing refers to: the text, the
+-- typesetting boxes, the closures of the 'Draw' monad. This is many times
+-- the size of the content. Thus 'drawWithPage' evaluates the drawing to
+-- bytes immediately, and the document keeps only these bytes.
+--
+-- The bytes are a lazy ByteString, which is a list of chunks (arrays of
+-- bytes):
+--
+-- * 'toLazyByteString' runs the builder of the drawing one time, and
+--   writes the bytes in chunks of 32 KB at most.
+-- * A second drawing on the same page adds its chunks to the list. No
+--   byte is copied.
+-- * When the document is rendered, the chunks go to zlib, or to the
+--   output if the document is not compressed.
+--
+-- Example: a document of 300 pages of text, 750 KB when it is written,
+-- needed 396 MiB of memory with the drawings not evaluated, and needs
+-- 58 MiB with the bytes.
+
 -- | Draw on a given page
 drawWithPage :: Monad m => PDFReference PDFPage -- ^ Page
             -> Draw a -- ^ Drawing commands
@@ -146,9 +174,13 @@ drawWithPage page draw = do
           case theContent of
             Nothing -> error "Can't find a content for the page to draw on it"
             -- If the stream is found
-            Just (_,(oldState,oldW)) -> do
+            Just (_,(oldState,oldContent)) -> do
               -- Create a new cntent and update the stream
               myBounds <- gets xobjectBound
-              let (a,state',w') = runDrawing draw (emptyEnvironment {streamId = streamRef, xobjectBoundD = myBounds}) oldState
-              modifyStrict $ \s -> s {streams = IM.insert streamRef (Just page,(state',mappend oldW w')) lStreams}
+              -- See Note [Memory of the drawings]
+              let !(a,!state',w') = runDrawing draw (emptyEnvironment {streamId = streamRef, xobjectBoundD = myBounds}) oldState
+                  content = toLazyByteString w'
+                  -- the length is known when all the chunks are evaluated
+                  !_size = B.length content
+              modifyStrict $ \s -> s {streams = IM.insert streamRef (Just page,(state',oldContent `B.append` content)) lStreams}
               return a

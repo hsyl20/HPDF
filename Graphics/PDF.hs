@@ -203,13 +203,13 @@ createStreams = do
      -- We compress only if the stream is not using its own filter
      if (compressed infos) && (not (pdfDictMember (PDFName "Filter") streamDict))
        then do
-         let w''' = compress . toLazyByteString $ w'
+         let w''' = compress w'
              w'' = fromLazyByteString w'''
          updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w'' True (Left ref) streamDict)
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length w'''))
        else do
-         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream w' False (Left ref) streamDict)
+         updateObject (PDFReference k :: PDFReference PDFStream) (PDFStream (fromLazyByteString w') False (Left ref) streamDict)
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length . toLazyByteString $ w'))
 

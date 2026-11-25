@@ -97,6 +97,10 @@
    * Text in more than one rectangle (#6): `displayFormattedTextIn` and
      `displayBoxes` fill a list of rectangles in order and return the boxes
      that did not fit.
+   * Less memory to build a large document: the content of a page is
+     evaluated to bytes when it is drawn, and no longer kept as a
+     computation until the document is rendered. A document of 300 pages
+     of text needs 58 MiB and no longer 396 MiB. The output is the same.
 
 ## 1.8
 
