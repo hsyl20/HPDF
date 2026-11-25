@@ -479,6 +479,8 @@ data PdfBuilder = PdfBuilder { supplySrc :: !Int -- ^ Supply of unique identifie
                          , fontObjects :: M.Map B.ByteString Int -- ^ Font dictionaries that are written as objects. See Note [Font dictionaries are indirect objects] in Graphics.PDF
                          , pdfaSettings :: Maybe PDFA -- ^ Write the document as PDF/A (see "Graphics.PDF.Archive")
                          , associatedFiles :: [(T.Text, String, PDFReference PDFDictionary)] -- ^ Embedded files: name, MIME type and file specification, most recent first
+                         , signatureValues :: [Int] -- ^ Signature dictionaries. See Note [Signature of a document] in Graphics.PDF.Signature
+                         , signatureFields :: [Int] -- ^ Signature fields that are written
                          , documentProblems :: [String] -- ^ Why the document does not conform to what was asked of it (PDF/A), found when it is saved
                          }
                          

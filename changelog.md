@@ -83,6 +83,15 @@
      /Names /EmbeddedFiles name tree (sorted by the bytes of the keys).
      Two files can have the same name.
      `facturXExtension` is the Factur-X / ZUGFeRD XMP schema.
+   * Digital signatures, `Graphics.PDF.Signature` (#8): `addSignature` adds
+     a signature field that is not visible and reserves the space of the
+     signature. `signPdfWith` signs the rendered document with a key and its
+     certificates (`readSigner`, `parseSigner`): a detached CMS signature
+     with SHA-256, for RSA keys and EC keys on a named curve. `signPdf`
+     gives the bytes to sign to a function of the caller instead, for a key
+     that the program cannot read. A document has one signature.
+     New dependencies: `crypton`, `crypton-x509`, `crypton-x509-store` and
+     `ram`. New example: `HPDF-Sign-Demo` (Test/sign.hs).
    * New examples: `HPDF-Unicode-Demo` (Test/unicode.hs) and
      `HPDF-PDFA-Demo` (Test/pdfa.hs).
    * Text in more than one rectangle (#6): `displayFormattedTextIn` and

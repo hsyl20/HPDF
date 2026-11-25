@@ -142,6 +142,7 @@ import Graphics.PDF.Fonts.TrueType
 import Graphics.PDF.Fonts.Encoding (unionEncodings, Encodings(..), PostscriptName)
 import Graphics.PDF.Archive
 import Graphics.PDF.LowLevel.Hash (fnv1a64OffsetBasis, fnv1a64Step)
+import Graphics.PDF.LowLevel.Signature (setByteRange)
 import Data.Word (Word64, Word8)
 import Data.List (sortOn)
 import qualified Data.Set as Set
@@ -274,11 +275,18 @@ instance PdfObject PrintedAnnotation where
 instance PdfLengthInfo PrintedAnnotation where
 
 instance AnnotationObject PrintedAnnotation where
-  addAnnotation = addObject
+  -- The annotation adds its object, with the other effects that it needs.
+  -- Then the object gets the dictionary with the flag.
+  addAnnotation printed@(PrintedAnnotation a) = do
+    PDFReference r <- addAnnotation a
+    updateObject (PDFReference r) printed
+    return (PDFReference r)
   annotationType (PrintedAnnotation a) = annotationType a
   annotationContent (PrintedAnnotation a) = annotationContent a
   annotationRect (PrintedAnnotation a) = annotationRect a
-  annotationDict (PrintedAnnotation a) = annotationDict a ++ [entry "F" (PDFInteger 4)]
+  annotationDict (PrintedAnnotation a) =
+    let entries = annotationDict a
+    in if any ((== PDFName "F") . fst) entries then entries else entries ++ [entry "F" (PDFInteger 4)]
 
 -- | Records a problem when a stream has a text annotation.
 -- See Note [Annotations of a PDF/A document]
@@ -375,9 +383,19 @@ saveObjects  = do
       ++ [ entry "Author" (pdfTextString (xmlText (author infos))) | not (T.null (author infos)) ]
       ++ [ entry "Subject" (pdfTextString (xmlText (subject infos))) | not (T.null (subject infos)) ]
       ++ [ entry "Producer" (pdfTextString producerName) ]
+  -- See Note [Signature of a document] in Graphics.PDF.Signature
+  fields <- gets signatureFields
+  let formEntries
+        | null fields = []
+        | otherwise =
+            [ entry "AcroForm" (dictFromList
+                [ entry "Fields" [ PDFReference f :: PDFReference PDFDictionary | f <- fields ]
+                -- SignaturesExist and AppendOnly
+                , entry "SigFlags" (PDFInteger 3)
+                ]) ]
   -- Create the catalog
   cat <- addObject $ PDFCatalog oref pRef (pageMode infos) (pageLayout infos) (viewerPreferences infos)
-           (metadata ++ intents ++ fileEntries)
+           (metadata ++ intents ++ fileEntries ++ formEntries)
   modifyStrict $ \s -> s {catalog = cat}
   return (cat, info)
  where
@@ -555,6 +573,8 @@ defaultPdfSettings =
            , fontObjects = M.empty
            , pdfaSettings = Nothing
            , associatedFiles = []
+           , signatureValues = []
+           , signatureFields = []
            , documentProblems = []
            }
 
@@ -632,8 +652,13 @@ renderDocument root info s =
           trailerInfo = case info of
             Nothing -> InlineInfo (docInfo s)
             Just i -> ArchiveInfo i (documentId (toLazyByteString (mconcat encodedObjects)))
+          rendered = generateStreams root trailerInfo 0 0 [] objectContents
+          -- offset of an object in the document
+          offsetOf k = sum [ B.length (toLazyByteString o)
+                           | (k', o) <- zip (0 : IM.keys objs) objectContents, k' < k ]
       in
-      generateStreams root trailerInfo 0 0 [] objectContents 
+      -- See Note [Layout of a signature dictionary] in Graphics.PDF.LowLevel.Signature
+      foldr (setByteRange . offsetOf) rendered (signatureValues s)
 
         --mconcat$ objectContents ++
         --        [ serialize "xref\n"
