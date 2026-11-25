@@ -69,8 +69,27 @@ jobs:
     - name: Build
       run: cabal build all
 
+    # The TrueType tests need a font. They fail without one when CI is set.
+    - name: Install a TrueType font for the tests
+      run: sudo apt-get install -y fonts-dejavu-core
+
     - name: Run tests
       run: cabal test all
 
     - name: Run the demo
       run: cabal run HPDF-demo
+
+    # veraPDF is the reference validator for PDF/A. One GHC version is enough:
+    # the bytes of the document do not depend on the compiler.
+    - name: Validate the PDF/A demo with veraPDF
+      if: matrix.ghc == '9.12.2'
+      run: |
+        sudo apt-get install -y colord-data
+        cabal run HPDF-PDFA-Demo
+        mkdir verapdf-in
+        mv pdfa.pdf verapdf-in/
+        docker run --rm --network none -v "$PWD/verapdf-in:/data:ro" \
+          verapdf/cli --flavour 3b --format text /data/pdfa.pdf | tee verapdf.txt
+        # Do not rely on the exit status of the image: read the verdict.
+        grep -q '^PASS' verapdf.txt
+        if grep -q '^FAIL' verapdf.txt; then exit 1; fi

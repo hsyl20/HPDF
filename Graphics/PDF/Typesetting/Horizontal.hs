@@ -294,6 +294,16 @@ drawTheTextBox state style x y t = do
       tell rbracket
       tell $ serialize " TJ")
       
+-- Note [Space glue without a space glyph]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- A two-byte (CID-keyed) font can have no glyph for U+0020. Its space glyph
+-- is then glyph 0 (.notdef), which must not be shown: the glue is written
+-- as a displacement of its full width.
+--
+-- Example: glue of width w with font size s
+--   with a space glyph:    [ <0003> -(w - ws) * 1000 / s ] TJ
+--   without a space glyph: [ -w * 1000 / s ] TJ
+
 -- | Draw the additional displacement required for a space in a text due to the dilaton of the glue
 drawTextGlue :: Style style 
              => style
@@ -303,12 +313,16 @@ drawTextGlue style w = do
     let ws = spaceWidth style
         pf@(PDFFont f size) = textFont . textStyle $ style
         delta = w - ws 
-        -- a space glyph, then the extra displacement
-        spaceGlyphs = fontGlyphs pf [spaceGlyph f]
+        sg = spaceGlyph f
+        -- See Note [Space glue without a space glyph]
+        has_space = glyphCodeBytes f == 1 || sg /= 0
+        spaceGlyphs = fontGlyphs pf [sg]
         spaceRun | glyphCodeBytes f == 1 = mconcat [lparen, bspace, rparen]
                  | otherwise = toPDF spaceGlyphs
-    recordGlyphs pf spaceGlyphs
-    tell . mconcat $ [ spaceRun,bspace,toPDF ((-delta) * 1000.0 / (fromIntegral size) ), bspace]  
+    when has_space (recordGlyphs pf spaceGlyphs)
+    tell . mconcat $ if has_space
+      then [ spaceRun,bspace,toPDF ((-delta) * 1000.0 / (fromIntegral size) ), bspace]
+      else [ toPDF ((-w) * 1000.0 / (fromIntegral size) ), bspace]
     
   
 data TextDrawingState = StartText -- ^ Send PDF commands needed to start a text

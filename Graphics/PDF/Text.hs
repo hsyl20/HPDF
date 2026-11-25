@@ -76,7 +76,7 @@ textWidth f t = glyphStreamWidth f . pdfGlyph f $ t
 pdfGlyph :: PDFFont
          -> T.Text 
          -> PDFGlyph 
-pdfGlyph (PDFFont f _) t = PDFGlyph . encodeGlyphs f . map (charGlyph f) . T.unpack $ t 
+pdfGlyph (PDFFont f _) t = PDFGlyph . encodeGlyphs f . map (charGlyph f) . filter (shownChar f) . T.unpack $ t 
 
 -- | Glyph codes as a glyph run for this font (one or two bytes per glyph,
 -- see 'glyphCodeBytes').
@@ -138,14 +138,33 @@ setFont f@(PDFFont n size) = PDFText $ do
                     ]
                     
   
+-- Note [Font of a text object]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The font that Tf sets is in the graphics state: it stays after the end of
+-- the text object (ET), until Q restores an older state. So a text object
+-- can show glyphs with the font of a text object before it:
+--
+--   drawText (text font 10 150 "ab")
+--   drawText (textStart 10 100 >> displayGlyphs glyphs)   -- no setFont
+--
+-- 'drawText' must know this font, or the glyphs of the second text object
+-- are not recorded for the font subset. Thus the stream state keeps it
+-- ('streamFont'), and 'withNewContext' restores it as Q does.
+
 -- | Draw a text in the draw monad
 drawText :: PDFText a
          -> Draw a
 drawText t = do
-    let ((a,w),s) = (runState . runWriterT . unText $ t) defaultParameters
+    -- See Note [Font of a text object]
+    inherited <- gets streamFont
+    let ((a,w),s) = (runState . runWriterT . unText $ t) defaultParameters {currentFont = inherited}
+    modifyStrict $ \st -> st { streamFont = currentFont s }
     mapM_ addFontRsrc (Set.elems (fontState s))
     unless (M.null (glyphsShown s)) $ modifyStrict $ \st ->
        st { usedGlyphs = M.unionWith IS.union (glyphsShown s) (usedGlyphs st) }
+    let unembedded = Set.fromList [ name f | f <- Set.elems (fontState s), not (fontEmbedded f) ]
+    unless (Set.null unembedded) $ modifyStrict $ \st ->
+       st { unembeddedFonts = Set.union unembedded (unembeddedFonts st) }
     tell . serialize $ "\nBT"
     tell w
     tell . serialize $ "\nET"
@@ -244,6 +263,9 @@ charSpace v = PDFText $ do
                       ]
 
 -- | Set the additional word space
+--
+-- A PDF reader adds this space to the one-byte character code 32 only. Thus
+-- it has no effect with a two-byte font ("Graphics.PDF.Fonts.TrueType").
 wordSpace :: UnscaledUnit -> PDFText ()
 wordSpace v = PDFText $ do
     lift (modifyStrict $ \s -> s {tw = v})

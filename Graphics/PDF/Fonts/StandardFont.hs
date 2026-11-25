@@ -104,6 +104,7 @@ instance IsFont StdFont where
   name (StdFont fs) = baseFont fs 
   hyphenGlyph (StdFont fs) = hyphen fs 
   spaceGlyph (StdFont fs) = space fs
+  fontEmbedded _ = False
 
 mkStdFont :: FontName -> IO (Either ParseError AnyFont)
 mkStdFont f = do

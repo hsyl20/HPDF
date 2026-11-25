@@ -107,7 +107,7 @@ library
       base >= 4.8 && < 5,
       containers,
       random >= 1.0, 
-      bytestring >= 0.9, 
+      bytestring >= 0.11, 
       array >= 0.1, 
       zlib >= 0.5, 
       binary >= 0.4, 
@@ -151,6 +151,7 @@ library
      Graphics.PDF.Archive
   Other-Modules:
      Graphics.PDF.LowLevel.Types
+     Graphics.PDF.LowLevel.Hash
      Graphics.PDF.Data.PDFTree
      Graphics.PDF.Data.Trie
      Graphics.PDF.Pages

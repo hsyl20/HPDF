@@ -29,15 +29,17 @@ module Graphics.PDF
   , writePdfT
   , renderPdf
   , renderPdfT
+  , renderPdfE
+  , renderPdfTE
   -- ** Step by step construction
   , emptyPdfBuilder
   , stepPDF
   , stepPDFT
   , buildPdf
+  , buildPdfE
   -- ** Deprecated
   , runPdf
   , pdfByteString
-  , pdfByteStringE
   -- ** PDF Common Types
   , PDFRect(..)
   , PDFFloat
@@ -112,7 +114,9 @@ import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Lazy as B
 import Data.Int
 import Text.Printf(printf)
+import Control.Monad (when)
 import Control.Monad.State
+import qualified Graphics.PDF.Data.PDFTree as PT
 import Data.Functor.Identity (runIdentity)
 import Graphics.PDF.Annotation
 import Graphics.PDF.LowLevel.Types
@@ -126,10 +130,9 @@ import Codec.Compression.Zlib
 import Graphics.PDF.Action
 import Graphics.PDF.Image
 import Graphics.PDF.Resources(emptyResource)
-import qualified Graphics.PDF.Resources as R
 import Data.Binary.Builder(Builder,fromLazyByteString, toLazyByteString)
 import Graphics.PDF.LowLevel.Serializer
-import Data.List(mapAccumL)
+import Data.List(intercalate, mapAccumL)
 import Data.Maybe(fromMaybe)
 import qualified Data.Text as T
 import Graphics.PDF.Fonts.Font 
@@ -138,9 +141,10 @@ import Graphics.PDF.Fonts.Type1
 import Graphics.PDF.Fonts.TrueType
 import Graphics.PDF.Fonts.Encoding (unionEncodings, Encodings(..), PostscriptName)
 import Graphics.PDF.Archive
-import Data.Bits (xor)
+import Graphics.PDF.LowLevel.Hash (fnv1a64OffsetBasis, fnv1a64Step)
 import Data.Word (Word64, Word8)
 import Data.List (sortOn)
+import qualified Data.Set as Set
 import qualified Data.ByteString as S
 import Control.Monad.Writer (tell)
 import qualified Data.ByteString.Lazy.Char8 as LC
@@ -151,14 +155,16 @@ createStreams = do
     ls <- gets streams >>= return . IM.toList
     modifyStrict $ \s -> s {streams = IM.empty}
     pdfa <- gets pdfaSettings
-    mapM_ (addStream . maybe id (const noInterpolation) pdfa) ls
+    mapM_ (addStream pdfa . maybe id (const noInterpolation) pdfa) ls
  where
     -- PDF/A forbids image interpolation (ISO 19005-2, 6.2.8)
     noInterpolation (k,(p,(st,w)))
       | pdfDictMember (PDFName "Interpolate") (otherRsrcs st) =
           (k,(p,(st {otherRsrcs = insertInPdfDict (PDFName "Interpolate") (AnyPdfObject False) (otherRsrcs st)},w)))
       | otherwise = (k,(p,(st,w)))
-    addStream (k,(p,(state',w'))) = do
+    -- See Note [Annotations of a PDF/A document]
+    pageAnnotations pdfa st = maybe id (const (map (AnyAnnotation . PrintedAnnotation))) pdfa (annots st)
+    addStream pdfa (k,(p,(state',w'))) = do
      -- New reference for the stream
      r <- supply
      -- Run the drawing and get the new state (resource, annotation)
@@ -177,7 +183,7 @@ createStreams = do
             Nothing -> return (otherRsrcs state') 
             -- Linked to a page
             Just pageRef -> do
-                 setPageAnnotations (annots state') pageRef
+                 setPageAnnotations (pageAnnotations pdfa state') pageRef
                  return emptyDictionary
        -- Some resource are needed by the stream
        else do
@@ -188,7 +194,7 @@ createStreams = do
                   return $ (otherRsrcs state') `pdfDictUnion` (dictFromList  $ [entry "Resources" rsrcRef])
              -- Linked to a page
              Just pageRef -> do
-                  setPageAnnotations (annots state') pageRef
+                  setPageAnnotations (pageAnnotations pdfa state') pageRef
                   setPageResource rsrcRef pageRef
                   return emptyDictionary
               
@@ -207,6 +213,42 @@ createStreams = do
          updateObject ref UnknownLength
          --updateObject ref (PDFLength (B.length . toLazyByteString $ w'))
 
+-- Note [Annotations of a PDF/A document]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- ISO 19005-2, 6.3 has two rules for the annotations:
+--
+-- * each annotation has the /F key with the Print flag (4). An annotation
+--   does not know that the document is PDF/A. Thus 'PrintedAnnotation' adds
+--   the key to the entries that 'annotationDict' gives. The annotations of
+--   a document that is not PDF/A are not changed.
+-- * each annotation other than a link has an appearance stream (/AP). HPDF
+--   writes none, so a text annotation is a problem of the document
+--   ('checkAnnotations').
+
+-- | An annotation with the Print flag.
+-- See Note [Annotations of a PDF/A document]
+newtype PrintedAnnotation = PrintedAnnotation AnyAnnotation
+
+instance PdfObject PrintedAnnotation where
+  toPDF = toPDF . dictFromList . annotationDict
+
+instance PdfLengthInfo PrintedAnnotation where
+
+instance AnnotationObject PrintedAnnotation where
+  addAnnotation = addObject
+  annotationType (PrintedAnnotation a) = annotationType a
+  annotationContent (PrintedAnnotation a) = annotationContent a
+  annotationRect (PrintedAnnotation a) = annotationRect a
+  annotationDict (PrintedAnnotation a) = annotationDict a ++ [entry "F" (PDFInteger 4)]
+
+-- | Records a problem when a stream has a text annotation.
+-- See Note [Annotations of a PDF/A document]
+checkAnnotations :: PDF ()
+checkAnnotations = do
+  as <- gets (concatMap (annots . fst . snd) . IM.elems . streams)
+  modifyStrict $ \s -> s {documentProblems = documentProblems s ++
+    [ "PDF/A: a text annotation has no appearance stream" | any ((== PDFName "Text") . annotationType) as ]}
+
 -- | Run the font finalizers with the glyph ids each font showed in any
 -- stream. A finalizer may add streams of its own (font programs, CMaps),
 -- which 'createStreams' then writes like any other.
@@ -217,19 +259,29 @@ finalizeFonts = do
   modifyStrict $ \s -> s {fontFinalizers = []}
   mapM_ ($ used) (reverse fs)
 
--- | Save all the pages and streams in the main object dictionary
-saveObjects :: Monad m => PDFT m (PDFReference PDFCatalog)
+-- | Save all the pages and streams in the main object dictionary. Also
+-- gives the reference of the indirect Info dictionary of a PDF/A document.
+saveObjects :: Monad m => PDFT m (PDFReference PDFCatalog, Maybe (PDFReference PDFDictionary))
 saveObjects  = do
   -- Write the fonts that wait for the glyphs the document used (subsets)
-  finalizeFonts
+  liftPDF finalizeFonts
   pdfa <- gets pdfaSettings
   -- PDF/A: the fonts must be embedded, so none of the standard 14
-  mapM_ (const checkEmbeddedFonts) pdfa
+  mapM_ (const (liftPDF checkEmbeddedFonts)) pdfa
+  mapM_ (const (liftPDF checkAnnotations)) pdfa
+  mapM_ (mapM_ problem . pdfaProblems) pdfa
   -- The output intent's ICC profile is a stream like the others
   intents <- case pdfa of
     Nothing -> return []
     Just a -> do
-      icc <- createContent (iccStream a) Nothing
+      let profile = pdfaOutputProfile a
+      -- See Note [Device colours in a PDF/A document]
+      case iccColorSpace profile of
+        Right "RGB " -> return ()
+        Right space -> problem ("PDF/A: the ICC profile of the output intent must be an RGB profile; its colour space is " ++ show space)
+        Left e -> problem ("PDF/A: the ICC profile of the output intent cannot be used: " ++ e)
+      liftPDF checkDeviceColours
+      icc <- createContent (iccStream profile) Nothing
       intent <- addObject . dictFromList $
         [ entry "Type" (PDFName "OutputIntent")
         , entry "S" (PDFName "GTS_PDFA1")
@@ -255,22 +307,34 @@ saveObjects  = do
              (dictFromList [entry "Type" (PDFName "Metadata"), entry "Subtype" (PDFName "XML")])
       return [entry "Metadata" r]
   -- Associated (embedded) files
-  files <- gets (sortOn fst . reverse . associatedFiles)
+  -- See Note [Keys of the EmbeddedFiles name tree]
+  files <- gets (reverse . associatedFiles)
+  let fileNames = [ n | (n, _, _) <- files ]
+      fileSpecs = [ r | (_, _, r) <- files ]
+      sorted = sortOn (textStringBytes . fst) (zip (uniqueKeys fileNames) fileSpecs)
+  case pdfa of
+    Nothing -> return ()
+    Just a -> do
+      when (pdfaPart a == 2 && not (null files)) $
+        problem "PDF/A: a PDF/A-2 document cannot have embedded files; use part 3"
+      mapM_ problem [ "PDF/A: the embedded file " ++ show n ++ " has no MIME type (" ++ show mime ++ ")"
+                    | (n, mime, _) <- files, '/' `notElem` mime ]
   let fileEntries
         | null files = []
         | otherwise =
-            [ entry "AF" (map snd files)
+            [ entry "AF" fileSpecs
             , entry "Names" (dictFromList [entry "EmbeddedFiles" (dictFromList
-                [entry "Names" (concat [[pdfTextString n, AnyPdfObject r] | (n, r) <- files])])])
+                [entry "Names" (concat [[pdfTextString n, AnyPdfObject r] | (n, r) <- sorted])])])
             ]
   -- PDF/A: an indirect Info dictionary that agrees with the metadata
   -- (other documents keep theirs in the trailer, as before)
   info <- case pdfa of
     Nothing -> return Nothing
     Just a -> fmap Just . addObject . dictFromList $
-         [ entry "Title" (pdfTextString (pdfaTitle a)) | not (T.null (pdfaTitle a)) ]
-      ++ [ entry "Author" (pdfTextString (author infos)) | not (T.null (author infos)) ]
-      ++ [ entry "Subject" (pdfTextString (subject infos)) | not (T.null (subject infos)) ]
+         -- 'xmlText': the same text as in the metadata
+         [ entry "Title" (pdfTextString (xmlText (pdfaTitle a))) | not (T.null (pdfaTitle a)) ]
+      ++ [ entry "Author" (pdfTextString (xmlText (author infos))) | not (T.null (author infos)) ]
+      ++ [ entry "Subject" (pdfTextString (xmlText (subject infos))) | not (T.null (subject infos)) ]
       ++ [ entry "Producer" (pdfTextString producerName) ]
   -- Create the catalog
   cat <- addObject $ PDFCatalog oref pRef (pageMode infos) (pageLayout infos) (viewerPreferences infos)
@@ -278,20 +342,67 @@ saveObjects  = do
   modifyStrict $ \s -> s {catalog = cat}
   return (cat, info)
  where
-  iccStream a = do
+  problem p = modifyStrict $ \s -> s {documentProblems = documentProblems s ++ [p]}
+  iccStream profile = do
     modifyStrict $ \s -> s {otherRsrcs = dictFromList [entry "N" (PDFInteger 3)]}
-    tell (fromLazyByteString (pdfaOutputProfile a))
+    tell (fromLazyByteString profile)
 
--- | Records a problem for each standard 14 font a stream uses: they are
--- not embedded, so the document cannot be PDF/A.
+-- Note [Keys of the EmbeddedFiles name tree]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- A reader does a binary search in a name tree, and compares the keys as
+-- byte strings (PDF 32000-1, 7.9.6). Thus the keys must be:
+--
+-- * sorted by the bytes that are written ('textStringBytes'), which is not
+--   the order of the texts. Example: "z.xml" is written as ASCII and
+--   "\228.xml" as UTF-16BE with a byte order mark (FE FF ...), so "z.xml"
+--   comes first, although 'z' > '\228' is False.
+-- * different. The key of a file is its name. But two files can have the
+--   same name: the name that a reader shows is in the file specification
+--   (/F, /UF), and the key only finds the file. A file whose name is
+--   already a key gets its name and a number as its key ('uniqueKeys').
+--   Example: "a.xml", "a.xml" have the keys "a.xml", "a.xml (2)".
+--
+-- The /AF array keeps the order in which the files were embedded.
+
+-- | A different key for each name, in the same order: the name, or the name
+-- and a number when the name is already a key.
+-- See Note [Keys of the EmbeddedFiles name tree]
+uniqueKeys :: [T.Text] -> [T.Text]
+uniqueKeys = snd . mapAccumL pick Set.empty
+ where
+  pick used n = let key = free used n (2 :: Int) n in (Set.insert key used, key)
+  free used n k key
+    | Set.member key used = free used n (k + 1) (n <> T.pack (" (" ++ show k ++ ")"))
+    | otherwise = key
+
+-- Note [Device colours in a PDF/A document]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- A PDF/A document can use a device colour space only when the output
+-- intent can give its colours a meaning (ISO 19005-2, 6.2.4.3): DeviceRGB
+-- needs an RGB profile, DeviceCMYK needs a CMYK profile, DeviceGray needs
+-- any profile.
+--
+-- The colour operators of "Graphics.PDF.Colors" write DeviceRGB colours, so
+-- the profile must be an RGB profile. A DeviceCMYK image (a CMYK JPEG) is
+-- then a problem.
+
+-- | Records a problem when an image is DeviceCMYK.
+-- See Note [Device colours in a PDF/A document]
+checkDeviceColours :: PDF ()
+checkDeviceColours = do
+  ss <- gets (map (otherRsrcs . fst . snd) . IM.elems . streams)
+  let is_cmyk (PDFDictionary d) =
+        fmap (toLazyByteString . toPDF) (M.lookup (PDFName "ColorSpace") d) == Just (LC.pack "/DeviceCMYK")
+  modifyStrict $ \s -> s {documentProblems = documentProblems s ++
+    [ "PDF/A: an image is DeviceCMYK; the output intent is an RGB profile" | any is_cmyk ss ]}
+
+-- | Records a problem for each font a stream uses whose program is not in
+-- the document (see 'fontEmbedded'): the document cannot be PDF/A.
 checkEmbeddedFonts :: PDF ()
 checkEmbeddedFonts = do
-  ss <- gets (IM.elems . streams)
-  let used = M.keys (M.unions [ fs | (_, (st, _)) <- ss
-                                    , Just (PDFDictionary fs) <- [M.lookup (PDFName "Font") (R.resources (rsrc st))] ])
-      bad = [ n | PDFName n <- used, n `elem` map show [Helvetica ..] ]
+  fonts <- gets (Set.toList . Set.unions . map (unembeddedFonts . fst . snd) . IM.elems . streams)
   modifyStrict $ \s -> s {documentProblems = documentProblems s ++
-    [ "PDF/A: the standard font " ++ n ++ " is not embedded; use an embedded (TrueType) font" | n <- bad ]}
+    [ "PDF/A: the font " ++ n ++ " is not embedded; use an embedded (TrueType) font" | n <- fonts ]}
 
 producerName :: T.Text
 producerName = T.pack "HPDF - The Haskell PDF Library"
@@ -343,10 +454,10 @@ instance PdfLengthInfo HexString where
 -- | 16 bytes from the document's objects (two FNV-1a 64 hashes), for the
 -- trailer @/ID@: the same document gets the same identifier.
 documentId :: B.ByteString -> S.ByteString
-documentId bytes = S.pack (word64Bytes (fnv 14695981039346656037) ++ word64Bytes (fnv 0x84222325cbf29ce4))
+documentId bytes = S.pack (word64Bytes (fnv fnv1a64OffsetBasis) ++ word64Bytes (fnv 0x84222325cbf29ce4))
  where
   fnv :: Word64 -> Word64
-  fnv h0 = B.foldl' (\h w -> (h `xor` fromIntegral w) * 1099511628211) h0 bytes
+  fnv h0 = B.foldl' (\h w -> fnv1a64Step h (fromIntegral w)) h0 bytes
   word64Bytes :: Word64 -> [Word8]
   word64Bytes w = [ fromIntegral (w `div` (256 ^ k)) | k <- [7, 6 .. 0 :: Int] ]
 
@@ -421,19 +532,51 @@ stepPDF m s = runIdentity (stepPDFT m s)
 stepPDFT :: PDFT m a -> PdfBuilder -> m (a, PdfBuilder)
 stepPDFT m s = runStateT (unPDFT m) s
 
+-- Note [Rendering a document that has problems]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- A document can ask for more than HPDF can give it: for example a PDF/A
+-- document that uses a standard 14 font, which is not embedded. Such
+-- problems are found when the document is saved ('documentProblems'). A
+-- document without a page is a problem too.
+--
+-- 'buildPdfE' and the other functions whose name ends in @E@ return the
+-- problems as a 'Left'. The functions without the @E@ cannot return them:
+-- the pure ones ('buildPdf', 'renderPdf') call 'error', and the ones in
+-- 'IO' ('writePdf', 'writePdfT') raise an 'IOError' before they write the
+-- file. No function writes a document that has problems.
+
 -- | Render the document of a builder.
 --
 -- The builder is not modified: the document can still be extended after this
 -- call, and rendered again.
+--
+-- Calls 'error' when the document has problems: see 'buildPdfE'.
 buildPdf :: PdfBuilder -> B.ByteString
-buildPdf s =
-  let (root, s') = stepPDF saveObjects s
-  in renderDocument root s'
+buildPdf = either (error . problemsMessage) id . buildPdfE
+
+-- | Like 'buildPdf', or the reasons the document is not what it was asked to
+-- be (for example a PDF/A document using a font that is not embedded).
+buildPdfE :: PdfBuilder -> Either [String] B.ByteString
+buildPdfE s
+  -- the page tree of a document cannot be empty
+  | Pages t <- pages s, PT.size t == 0 = Left ["the document has no page"]
+  | otherwise =
+      let ((root, info), s') = stepPDF saveObjects s
+      in case documentProblems s' of
+           [] -> Right (renderDocument root info s')
+           ps -> Left ps
+
+-- | The message of the exception raised for a document that has problems.
+problemsMessage :: [String] -> String
+problemsMessage ps = intercalate "\n" ("HPDF: the document cannot be rendered:" : map ("  " ++) ps)
 
 -- | Render the objects of a complete document
-renderDocument :: PDFReference PDFCatalog -> PdfBuilder -> B.ByteString
-renderDocument root s =
-      let header = serialize "%PDF-1.5\n"
+renderDocument :: PDFReference PDFCatalog -> Maybe (PDFReference PDFDictionary) -> PdfBuilder -> B.ByteString
+renderDocument root info s =
+      let header = case pdfaSettings s of
+            -- PDF/A: a comment line of four bytes above 127 after the header
+            Just _ -> fromLazyByteString (LC.pack "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n")
+            Nothing -> serialize "%PDF-1.5\n"
           objectEncoding (x,a) = toPDF . PDFReferencedObject (fromIntegral $! x) $ a
           objs = objects s
           encodeAnObject im k =
@@ -447,10 +590,10 @@ renderDocument root s =
           objectContents = header : encodedObjects
           (_nb, _len, _toc) = writeObjectsAndCreateToc objectContents
           trailerInfo = case info of
-            Nothing -> InlineInfo (docInfo pdfState)
+            Nothing -> InlineInfo (docInfo s)
             Just i -> ArchiveInfo i (documentId (toLazyByteString (mconcat encodedObjects)))
       in
-      generateStreams root (docInfo s) 0 0 [] objectContents 
+      generateStreams root trailerInfo 0 0 [] objectContents 
 
         --mconcat$ objectContents ++
         --        [ serialize "xref\n"
@@ -468,33 +611,62 @@ renderDocument root s =
         --        ]
 
 -- | Render a PDF document as a lazy bytestring
+--
+-- Calls 'error' when the document has problems: see 'renderPdfE'.
 renderPdf :: PDFDocumentInfo
           -> PDFRect -- ^ Default size for a page
           -> PDF a  -- ^ PDF action
           -> B.ByteString
 renderPdf infos rect m = runIdentity (renderPdfT infos rect m)
 
+-- | Like 'renderPdf', or the reasons the document is not what it was asked to
+-- be (for example a PDF/A document using a font that is not embedded).
+renderPdfE :: PDFDocumentInfo
+           -> PDFRect -- ^ Default size for a page
+           -> PDF a  -- ^ PDF action
+           -> Either [String] B.ByteString
+renderPdfE infos rect m = runIdentity (renderPdfTE infos rect m)
+
 -- | Render a PDF document as a lazy bytestring, running the PDF action in
 -- the base monad @m@ (see 'PDFT')
+--
+-- Calls 'error' when the document has problems: see 'renderPdfTE'.
 renderPdfT :: Monad m
            => PDFDocumentInfo
            -> PDFRect -- ^ Default size for a page
            -> PDFT m a  -- ^ PDF action
            -> m B.ByteString
-renderPdfT infos rect m = do
+renderPdfT infos rect m = either (error . problemsMessage) id <$> renderPdfTE infos rect m
+
+-- | Like 'renderPdfT', or the reasons the document is not what it was asked
+-- to be.
+renderPdfTE :: Monad m
+            => PDFDocumentInfo
+            -> PDFRect -- ^ Default size for a page
+            -> PDFT m a  -- ^ PDF action
+            -> m (Either [String] B.ByteString)
+renderPdfTE infos rect m = do
   (_, s) <- stepPDFT m (emptyPdfBuilder infos rect)
-  return (buildPdf s)
+  return (buildPdfE s)
 
 -- | Write a PDF document to a file
+--
+-- Raises an 'IOError' before the file is written when the document has
+-- problems: see 'renderPdfE'.
 writePdf :: String -- ^ Name of the PDF document
          -> PDFDocumentInfo
          -> PDFRect -- ^ Default size for a page
          -> PDF a  -- ^ PDF action
          -> IO ()
-writePdf filename infos rect m = B.writeFile filename (renderPdf infos rect m)
+writePdf filename infos rect m = case renderPdfE infos rect m of
+  Left ps -> ioError (userError (problemsMessage ps))
+  Right bs -> B.writeFile filename bs
 
 -- | Write a PDF document to a file, running the PDF action in the base
 -- monad @m@ (see 'PDFT')
+--
+-- Raises an 'IOError' before the file is written when the document has
+-- problems: see 'renderPdfE'.
 writePdfT :: MonadIO m
           => String -- ^ Name of the PDF document
           -> PDFDocumentInfo
@@ -502,8 +674,8 @@ writePdfT :: MonadIO m
           -> PDFT m a  -- ^ PDF action
           -> m ()
 writePdfT filename infos rect m = do
-  bytestring <- renderPdfT infos rect m
-  liftIO (B.writeFile filename bytestring)
+  r <- renderPdfTE infos rect m
+  liftIO (either (ioError . userError . problemsMessage) (B.writeFile filename) r)
 
 {-# DEPRECATED runPdf "Use writePdf" #-}
 runPdf :: String -> PDFDocumentInfo -> PDFRect -> PDF a -> IO ()
@@ -512,16 +684,4 @@ runPdf = writePdf
 {-# DEPRECATED pdfByteString "Use renderPdf" #-}
 pdfByteString :: PDFDocumentInfo -> PDFRect -> PDF a -> B.ByteString
 pdfByteString = renderPdf
-
--- | Like 'pdfByteString', or the reasons the document is not what it was
--- asked to be (a PDF/A document using a font that is not embedded).
-pdfByteStringE :: PDFDocumentInfo
-               -> PDFRect -- ^ Default size for a page
-               -> PDF a  -- ^ PDF action
-               -> Either [String] B.ByteString
-pdfByteStringE infos rect m =
-  case createDocument (defaultPdfSettings {defaultRect = rect, docInfo = infos}) m of
-    ([], bytes) -> Right bytes
-    (problems, _) -> Left problems
-
 
