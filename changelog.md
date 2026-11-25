@@ -32,6 +32,15 @@
      EmbedWhole` embeds the whole font. Glyphs reach the subset through
      `recordGlyphs`, which `displayGlyphs`, `displayText`, `text` and the
      typesetting code call.
+   * The name of an embedded TrueType font in the content streams is its
+     PostScript name and an object number (`DejaVuSans_7`), so two fonts
+     with the same PostScript name are two fonts. A control character and a
+     soft hyphen (U+00AD) show no glyph with a TrueType font. A font whose
+     loca table is not in increasing order is embedded whole.
+   * Typesetting: a soft hyphen (U+00AD) between two characters is a place
+     where the line can break, and it is not shown in other positions.
+   * `wordSpace` has no effect with a two-byte (TrueType) font: this is
+     how the Tw operator works.
    * PDF/A-3b output, `Graphics.PDF.Archive`: `setPDFA (pdfa3b icc)` writes,
      when the document is saved, an uncompressed XMP metadata stream
      (pdfaid, Dublin Core title/creator/description, pdf:Producer, and any
@@ -39,13 +48,25 @@
      OutputIntent with the given ICC profile, an indirect Info dictionary, a
      trailer /ID (a hash of the objects, so output stays deterministic), a
      PDF 1.7 header with a binary comment line, and no image interpolation.
-     `pdfByteStringE` returns the document or the reasons it is not PDF/A
-     (a standard 14 font, which is not embedded). Documents that do not
-     call `setPDFA` are written exactly as before.
+     Documents that do not call `setPDFA` are written exactly as before.
+   * A document that has problems is not written. A document without a
+     page is a problem. The problems of a PDF/A document are: a part other
+     than 2 and 3 or a conformance level other than B, a font that is not
+     embedded (a standard 14 font), an output intent that is not an RGB ICC
+     profile, a DeviceCMYK image, a text annotation (it has no appearance
+     stream), an embedded file without a MIME type or in a PDF/A-2
+     document, and an XMP extension prefix or property name that is not an
+     XML name. The link annotations of a PDF/A document get the Print flag
+     (/F 4). `renderPdfE`, `renderPdfTE` and `buildPdfE` return the
+     problems as a `Left`; `renderPdf`, `renderPdfT` and `buildPdf` call
+     `error`; `writePdf` and `writePdfT` raise an `IOError` and write no
+     file. `IsFont` gains `fontEmbedded` (default `True`).
    * Embedded and associated files (PDF/A-3): `embedAssociatedFile` writes
      an EmbeddedFile stream (MIME /Subtype, /Params with /Size and optional
-     /CreationDate and /ModDate) and a Filespec (/F, /UF, /AFRelationship,
-     /Desc), listed in the catalog's /AF array and /Names /EmbeddedFiles.
+     /CreationDate and /ModDate) and a Filespec (/F in PDFDocEncoding, /UF,
+     /AFRelationship, /Desc), listed in the catalog's /AF array and in the
+     /Names /EmbeddedFiles name tree (sorted by the bytes of the keys).
+     Two files can have the same name.
      `facturXExtension` is the Factur-X / ZUGFeRD XMP schema.
    * New examples: `HPDF-Unicode-Demo` (Test/unicode.hs) and
      `HPDF-PDFA-Demo` (Test/pdfa.hs).

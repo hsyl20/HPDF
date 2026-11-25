@@ -29,6 +29,8 @@ module Graphics.PDF.Fonts.Font(
     , readFontData
     , encodeGlyphs
     , decodeGlyphs
+    , shownChar
+    , spaceAdvance
 ) where 
 
 import Graphics.PDF.LowLevel.Types
@@ -37,6 +39,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.ByteString as B
 import Graphics.PDF.Fonts.FontTypes
 import Data.Bits (shiftL, shiftR, (.|.))
+import Data.Char (isControl)
 
 emptyFontStructure :: FontStructure
 emptyFontStructure = FS { baseFont = ""
@@ -93,6 +96,35 @@ class IsFont f where
     -- the Identity-H encoding.
     glyphCodeBytes :: f -> Int
     glyphCodeBytes _ = 1
+    -- | Whether the font program is in the document. 'False' only for the
+    -- standard 14 fonts; a PDF/A document must not use such a font.
+    fontEmbedded :: f -> Bool
+    fontEmbedded _ = True
+
+-- Note [Characters that have no glyph to show]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- A control character (a tab, a new line) and the soft hyphen U+00AD are
+-- not characters to show. A simple font has no glyph for them, so they show
+-- nothing. But a TrueType font gives them glyph 0, which is a visible box,
+-- or (soft hyphen) the glyph of a hyphen. Thus they are removed from the
+-- text shown with a two-byte font ('shownChar').
+--
+-- The text of a simple font is not changed, so its output stays the same.
+--
+-- A character that the font does not have is shown as glyph 0 with both
+-- kinds of font: the reader sees that a glyph is missing.
+
+-- | Whether a character of a text is shown with this font.
+-- See Note [Characters that have no glyph to show]
+shownChar :: IsFont f => f -> Char -> Bool
+shownChar f c = glyphCodeBytes f == 1 || not (isControl c || c == '\xAD')
+
+-- | The advance of a space. A two-byte font that has no space glyph gets a
+-- quarter of the font size, and not the advance of glyph 0.
+spaceAdvance :: IsFont f => f -> FontSize -> PDFFloat
+spaceAdvance f s
+  | glyphCodeBytes f /= 1 && spaceGlyph f == 0 = fromIntegral s / 4
+  | otherwise = glyphWidth f s (spaceGlyph f)
 
 data AnyFont = forall f. (IsFont f,PdfResourceObject f,Show f) => AnyFont f
 
@@ -117,6 +149,7 @@ instance IsFont AnyFont where
     spaceGlyph (AnyFont f) = spaceGlyph f
     charGlyph (AnyFont f) = charGlyph f
     glyphCodeBytes (AnyFont f) = glyphCodeBytes f
+    fontEmbedded (AnyFont f) = fontEmbedded f
 
 instance Eq AnyFont where 
     a == b = name a == name b

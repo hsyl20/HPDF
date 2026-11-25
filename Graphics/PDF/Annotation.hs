@@ -119,8 +119,7 @@ standardAnnotationDict a = [entry "Type" (PDFName $ "Annot")
 --  annotationRect (Screen _ _ r _ _ _) = r
                              
 instance PdfObject TextAnnotation where
-      toPDF a@(TextAnnotation _ _ i) = toPDF . dictFromList $
-           standardAnnotationDict a ++ [entry "Name" (PDFName $ show i)]
+      toPDF = toPDF . dictFromList . annotationDict
 
 instance PdfLengthInfo TextAnnotation where
 
@@ -129,16 +128,14 @@ instance AnnotationObject TextAnnotation where
     annotationType _ = PDFName "Text"
     annotationContent (TextAnnotation s _ _) = AnyPdfObject (toPDFString s)
     annotationRect (TextAnnotation _ r _) = r
+    annotationDict a@(TextAnnotation _ _ i) =
+        standardAnnotationDict a ++ [entry "Name" (PDFName $ show i)]
     annotationToGlobalCoordinates (TextAnnotation a r b) = do
         gr <- transformAnnotRect r
         return $ TextAnnotation a gr b
     
 instance PdfObject URLLink where
-    toPDF a@(URLLink _ _ url border) = toPDF . dictFromList $
-           standardAnnotationDict a ++ 
-            [ entry "A" (GoToURL url)
-            , entry "Border" (getBorder border)
-            ]
+    toPDF = toPDF . dictFromList . annotationDict
 
 instance PdfLengthInfo URLLink where
            
@@ -147,21 +144,17 @@ instance AnnotationObject URLLink where
     annotationType _ = PDFName "Link"
     annotationContent (URLLink s _ _ _) = AnyPdfObject (toPDFString s)
     annotationRect (URLLink _ r _ _) = r
+    annotationDict a@(URLLink _ _ url border) =
+        standardAnnotationDict a ++
+            [ entry "A" (GoToURL url)
+            , entry "Border" (getBorder border)
+            ]
     annotationToGlobalCoordinates (URLLink a r b c) = do
         gr <- transformAnnotRect r
         return $ URLLink a gr b c
         
 instance PdfObject PDFLink where
-    toPDF a@(PDFLink _ _ page x y border) = toPDF . dictFromList $
-               standardAnnotationDict a ++ 
-                [entry "Dest" dest
-                ,entry "Border" (getBorder border)]
-     where
-         dest =  [ AnyPdfObject page
-                 , AnyPdfObject (PDFName "XYZ")
-                 , AnyPdfObject x
-                 , AnyPdfObject y
-                 , AnyPdfObject (PDFInteger 0)] 
+    toPDF = toPDF . dictFromList . annotationDict
                                                         
 instance PdfLengthInfo PDFLink where
 
@@ -170,6 +163,16 @@ instance AnnotationObject PDFLink where
     annotationType _ = PDFName "Link"
     annotationContent (PDFLink s _ _ _ _ _) = AnyPdfObject (toPDFString s)
     annotationRect (PDFLink _ r _ _ _ _) = r
+    annotationDict a@(PDFLink _ _ page x y border) =
+        standardAnnotationDict a ++
+            [entry "Dest" dest
+            ,entry "Border" (getBorder border)]
+      where
+        dest =  [ AnyPdfObject page
+                , AnyPdfObject (PDFName "XYZ")
+                , AnyPdfObject x
+                , AnyPdfObject y
+                , AnyPdfObject (PDFInteger 0)]
     annotationToGlobalCoordinates (PDFLink a r b c d e) = do
         gr <- transformAnnotRect r
         return $ PDFLink a gr b c d e

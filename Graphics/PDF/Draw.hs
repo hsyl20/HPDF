@@ -118,6 +118,7 @@ import Data.Monoid
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
+import qualified Data.Set as Set
 import qualified Data.Binary.Builder as BU
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
@@ -154,6 +155,8 @@ class AnnotationObject a where
     annotationType :: a -> PDFName
     annotationContent :: a -> AnyPdfObject
     annotationRect :: a -> [PDFFloat]
+    -- | The entries of the annotation dictionary
+    annotationDict :: a -> [(PDFName,AnyPdfObject)]
     annotationToGlobalCoordinates :: a -> Draw a
     annotationToGlobalCoordinates = return
     
@@ -170,6 +173,7 @@ instance AnnotationObject AnyAnnotation where
     annotationType (AnyAnnotation a) = annotationType a
     annotationContent (AnyAnnotation a) = annotationContent a
     annotationRect (AnyAnnotation a) = annotationRect a
+    annotationDict (AnyAnnotation a) = annotationDict a
     
 
 -- | A PDF color
@@ -192,6 +196,8 @@ data DrawState = DrawState {
                 ,  softMasks :: M.Map SoftMask String
                 ,  matrix :: [Matrix]
                 ,  usedGlyphs :: M.Map String IS.IntSet -- ^ Glyph ids shown with each subset font, by font name
+                ,  unembeddedFonts :: Set.Set String -- ^ Names of the fonts used whose program is not in the document
+                ,  streamFont :: Maybe PDFFont -- ^ Font of the graphics state. See Note [Font of a text object] in Graphics.PDF.Text
                 }
 data DrawEnvironment = DrawEnvironment {
                         streamId :: Int
@@ -309,7 +315,7 @@ supplyName = do
 emptyDrawState :: Int -> DrawState
 emptyDrawState ref = 
     let names = (map (("O" ++ (show ref)) ++ ) $ [replicate k ['a'..'z'] | k <- [1..]] >>= sequence) in
-    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty
+    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty Set.empty Nothing
   
 -- | Execute the drawing commands to get a new state and an uncompressed PDF stream
 runDrawing :: Draw a -> DrawEnvironment -> DrawState -> (a,DrawState,BU.Builder)
@@ -350,7 +356,9 @@ withNewContext :: Draw a -> Draw a
 withNewContext m = do
     tell . serialize $ "\nq"
     pushMatrixStack identity
+    font <- gets streamFont
     a <- m
+    modifyStrict $ \s -> s {streamFont = font}
     popMatrixStack
     tell . serialize $ "\nQ"
     return a
@@ -469,7 +477,7 @@ data PdfBuilder = PdfBuilder { supplySrc :: !Int -- ^ Supply of unique identifie
                          , firstOutline :: [Bool] -- ^ Used to improve the outline API
                          , fontFinalizers :: [M.Map String IS.IntSet -> PDF ()] -- ^ Run when the document is saved, with the glyph ids every stream used per font name (font subsetting)
                          , pdfaSettings :: Maybe PDFA -- ^ Write the document as PDF/A (see "Graphics.PDF.Archive")
-                         , associatedFiles :: [(T.Text, PDFReference PDFDictionary)] -- ^ Embedded files (file specifications) by name, most recent first
+                         , associatedFiles :: [(T.Text, String, PDFReference PDFDictionary)] -- ^ Embedded files: name, MIME type and file specification, most recent first
                          , documentProblems :: [String] -- ^ Why the document does not conform to what was asked of it (PDF/A), found when it is saved
                          }
                          
@@ -587,8 +595,8 @@ data PDFDocumentInfo = PDFDocumentInfo {
 -- | What a PDF/A document declares and embeds besides its pages. Set it
 -- with 'Graphics.PDF.Archive.setPDFA'.
 data PDFA = PDFA {
-    pdfaPart :: !Int -- ^ PDF/A part (2 or 3)
-  , pdfaConformance :: !String -- ^ conformance level (@B@)
+    pdfaPart :: !Int -- ^ PDF/A part: 3, or 2 for a document without embedded files
+  , pdfaConformance :: !String -- ^ conformance level: @B@ only
   , pdfaTitle :: !T.Text -- ^ document title (Info @/Title@ and @dc:title@); empty for none
   , pdfaOutputProfile :: !B.ByteString -- ^ the ICC profile of the output intent (an RGB profile such as sRGB)
   , pdfaOutputCondition :: !T.Text -- ^ its @OutputConditionIdentifier@, e.g. @sRGB IEC61966-2.1@

@@ -57,7 +57,7 @@ main = do
       case ttf of
         Left e -> putStrLn ("cannot read " ++ path ++ ": " ++ e) >> exitFailure
         Right fontData -> do
-          runPdf "unicode.pdf" (standardDocInfo { author = "HPDF", compressed = True }) (PDFRect 0 0 460 240) $ do
+          writePdf "unicode.pdf" (standardDocInfo { author = "HPDF", compressed = True }) (PDFRect 0 0 460 240) $ do
             -- Type0 / CIDFontType2, Identity-H, /W widths, a ToUnicode CMap;
             -- the font program is subset when the document is saved.
             font <- mkTrueTypeFont fontData

@@ -18,7 +18,7 @@ Cyrillic, Latin Extended...), embed a TrueType font:
 
 ```haskell
 Right ttf <- readTrueTypeFont "DejaVuSans.ttf"
-runPdf "unicode.pdf" standardDocInfo (PDFRect 0 0 300 100) $ do
+writePdf "unicode.pdf" standardDocInfo (PDFRect 0 0 300 100) $ do
   font <- mkTrueTypeFont ttf          -- a subset is embedded when the document is saved
   page <- addPage Nothing
   drawWithPage page $
@@ -38,15 +38,16 @@ output intent) and embeds files associated with the document:
 ```haskell
 import Graphics.PDF.Archive
 
-pdfByteStringE standardDocInfo rect $ do
+renderPdfE standardDocInfo rect $ do
   setPDFA (pdfa3b srgbIccBytes) { pdfaTitle = "Report" }
   _ <- embedAssociatedFile (associatedFile "data.csv" "text/csv" csvBytes)
   font <- mkTrueTypeFont ttf          -- PDF/A needs embedded fonts
   ...
 ```
 
-`pdfByteStringE` returns `Left` with the reasons a PDF/A document is not
-conforming (a standard 14 font, which is not embedded).
+`renderPdfE` returns `Left` with the reasons a PDF/A document is not
+conforming (a standard 14 font, which is not embedded). `writePdf` and
+`renderPdf` raise an exception for such a document: they do not write it.
 `cabal run HPDF-PDFA-Demo -- font.ttf sRGB.icc` writes `pdfa.pdf`.
 
 ## Documentation

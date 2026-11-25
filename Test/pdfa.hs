@@ -60,9 +60,9 @@ main = do
   Right fontData <- readTrueTypeFont fontPath
   icc <- BL.readFile iccPath
   let info = standardDocInfo { author = "HPDF", compressed = True }
-  -- pdfByteStringE refuses a PDF/A document that uses a standard 14 font
-  -- (they are not embedded)
-  case pdfByteStringE info (PDFRect 0 0 420 200) (document fontData icc) of
+  -- renderPdfE gives the problems of a PDF/A document that cannot conform:
+  -- for example a standard 14 font (they are not embedded)
+  case renderPdfE info (PDFRect 0 0 420 200) (document fontData icc) of
     Left problems -> mapM_ putStrLn problems >> exitFailure
     Right bytes -> do
       BL.writeFile "pdfa.pdf" bytes
@@ -83,6 +83,9 @@ document fontData icc = do
     drawText $ text (PDFFont font 10) 24 140 "This document embeds greetings.csv:"
     drawText $ text (PDFFont font 10) 40 120 "Bonjour · Γειά σου · Привет"
     drawText $ text (PDFFont font 9) 24 24 "Every font is embedded; the metadata says PDF/A-3, conformance B."
+    -- A link annotation. In a PDF/A document it gets the Print flag (/F 4)
+    drawText $ text (PDFFont font 9) 24 44 "A link to the top of this page"
+    newAnnotation (PDFLink "top of the page" [24, 40, 160, 54] page 0 200 False)
 
 greetings :: BL.ByteString
 greetings = BL.fromStrict . TE.encodeUtf8 . T.unlines $

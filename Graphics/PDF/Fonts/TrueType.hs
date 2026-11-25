@@ -17,7 +17,7 @@
 -- PDF correctly.
 --
 -- > Right ttf <- readTrueTypeFont "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
--- > runPdf "out.pdf" standardDocInfo rect $ do
+-- > writePdf "out.pdf" standardDocInfo rect $ do
 -- >   font <- mkTrueTypeFont ttf
 -- >   page <- addPage Nothing
 -- >   drawWithPage page $ drawText $ text (PDFFont font 12) 10 200 "Привіт, світ"
@@ -47,16 +47,16 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import qualified Data.Map.Strict as M
 import qualified Data.Vector.Unboxed as V
-import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
-import Data.Char (chr, isAlphaNum, ord)
+import Data.Bits (shiftL, shiftR, (.&.), (.|.))
+import Data.Char (chr, isAlphaNum, isAscii, ord)
 import Data.Int (Int16, Int32)
-import Data.List (sortOn)
-import Data.Word (Word64)
+import Data.List (foldl', sortOn)
 import Control.Monad.Writer (tell)
 import Data.Binary.Builder (fromByteString)
 import Text.Printf (printf)
 
 import Graphics.PDF.LowLevel.Types
+import Graphics.PDF.LowLevel.Hash (fnv1a64OffsetBasis, fnv1a64Step)
 import Graphics.PDF.Resources
 import Graphics.PDF.Draw
 import Graphics.PDF.Pages (createContent, addObject, updateObject)
@@ -81,7 +81,7 @@ instance Show TrueTypeFontData where
   show t = "TrueTypeFontData " ++ show (ttPsName t)
 
 -- | The font's PostScript name (@name@ table, name id 6), used as its
--- @BaseFont@ and its resource name.
+-- @BaseFont@.
 trueTypePostScriptName :: TrueTypeFontData -> String
 trueTypePostScriptName = ttPsName
 
@@ -90,18 +90,47 @@ trueTypeCharacters :: TrueTypeFontData -> [Char]
 trueTypeCharacters = map chr . IM.keys . ttCmap
 
 -- | A TrueType font embedded in a document. Make one with 'mkTrueTypeFont'.
-data TrueTypeFont = TrueTypeFont !TrueTypeFontData !(PDFReference PDFDictionary)
+--
+-- See Note [Name of an embedded TrueType font]
+data TrueTypeFont = TrueTypeFont
+  { tfData :: !TrueTypeFontData
+  , tfName :: !String -- ^ name of the font in the resources of a page
+  , tfType0 :: !(PDFReference PDFDictionary)
+  }
+
+-- Note [Name of an embedded TrueType font]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The 'name' of a font is its key in the resources of a page, its name in
+-- the content streams (/Name 12 Tf), and what makes two fonts different
+-- for HPDF. The PostScript name cannot be this name: two font files can
+-- have the same one (two fonts without a name table are "TrueTypeFont"; a
+-- TrueType font can be named "Helvetica" as the standard font). Their text
+-- would then be shown with one of the two fonts only.
+--
+-- Thus the name is the PostScript name and the object number of the font
+-- dictionary, which is different for each call of 'mkTrueTypeFontWith':
+--
+--   /BaseFont /ABCDEF+DejaVuSans     PostScript name, with the subset tag
+--   /DejaVuSans_7 12 Tf              name in the content streams
 
 instance Show TrueTypeFont where
-  show (TrueTypeFont d _) = "TrueTypeFont " ++ show (ttPsName d)
+  show f = "TrueTypeFont " ++ show (tfName f)
 
 readTrueTypeFont :: FilePath -> IO (Either String TrueTypeFontData)
 readTrueTypeFont path = parseTrueTypeFont <$> B.readFile path
 
 -- Reading ----------------------------------------------------------------
 
+-- Note [Total sfnt readers]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The readers give 0 for an offset outside the bytes. A malformed font then
+-- cannot raise an exception: the parsers check the lengths of the structures
+-- that a font must have, and return Left. Bad optional data gives an
+-- incomplete result (for example a cmap with fewer characters).
+
+-- | See Note [Total sfnt readers]
 u8 :: B.ByteString -> Int -> Int
-u8 bs i = fromIntegral (B.index bs i)
+u8 bs i = maybe 0 fromIntegral (B.indexMaybe bs i)
 
 u16 :: B.ByteString -> Int -> Int
 u16 bs i = (u8 bs i `shiftL` 8) .|. u8 bs (i + 1)
@@ -115,30 +144,47 @@ u32 bs i = (u16 bs i `shiftL` 16) .|. u16 bs (i + 2)
 i32 :: B.ByteString -> Int -> Int
 i32 bs i = fromIntegral (fromIntegral (u32 bs i) :: Int32)
 
+-- | @Left@ with this message unless the condition holds.
+check :: Bool -> String -> Either String ()
+check True _ = Right ()
+check False e = Left e
+
+-- | The table directory of an sfnt file: each table that lies within the
+-- file, by tag. @Left@ when the file is too short for its header or for the
+-- directory it declares.
+sfntTables :: B.ByteString -> Either String (M.Map String B.ByteString)
+sfntTables bs = do
+  check (B.length bs >= 12) "file too short"
+  let numTables = u16 bs 4
+  check (B.length bs >= 12 + 16 * numTables) "table directory runs past the end of the file"
+  pure $ M.fromList
+    [ (C.unpack (B.take 4 (B.drop o bs)), B.take len (B.drop off bs))
+    | i <- [0 .. numTables - 1]
+    , let o = 12 + 16 * i
+          off = u32 bs (o + 8)
+          len = u32 bs (o + 12)
+    , off + len <= B.length bs ]
+
 -- | Parses the tables a PDF needs (@head@, @hhea@, @hmtx@, @maxp@, @cmap@,
 -- @OS/2@, @post@, @name@). Only TrueType outlines (@glyf@) are accepted:
 -- an OpenType font with CFF outlines would need a @FontFile3@.
 parseTrueTypeFont :: B.ByteString -> Either String TrueTypeFontData
 parseTrueTypeFont bs = do
-  check (B.length bs >= 12) "file too short"
+  dir <- sfntTables bs
   let sfnt = B.take 4 bs
   check (sfnt == B.pack [0, 1, 0, 0] || sfnt == "true") $
     if sfnt == "OTTO" then "CFF outlines (OpenType/CFF) are not supported, only TrueType outlines" else "not a TrueType font"
-  let numTables = u16 bs 4
-      dir = M.fromList
-        [ (C.unpack (B.take 4 (B.drop o bs)), (u32 bs (o + 8), u32 bs (o + 12)))
-        | i <- [0 .. numTables - 1], let o = 12 + 16 * i ]
-      table t = case M.lookup t dir of
-        Just (off, len) | off + len <= B.length bs -> Right (B.take len (B.drop off bs))
-        Just _ -> Left ("table " ++ t ++ " runs past the end of the file")
+  let table t = case M.lookup t dir of
+        Just b -> Right b
         Nothing -> Left ("no " ++ t ++ " table")
-      optTable t = either (const Nothing) Just (table t)
+      optTable t = M.lookup t dir
   check (M.member "glyf" dir) "no glyf table (only TrueType outlines are supported)"
   hd <- table "head"
   hh <- table "hhea"
   mx <- table "maxp"
   hm <- table "hmtx"
   cm <- table "cmap"
+  check (B.length hd >= 54 && B.length hh >= 36 && B.length mx >= 6) "short head, hhea or maxp table"
   let upem = u16 hd 18
       bbox = [i16 hd 36, i16 hd 38, i16 hd 40, i16 hd 42]
       asc = i16 hh 4
@@ -169,12 +215,11 @@ parseTrueTypeFont bs = do
     , ttItalicAngle = italicA
     , ttFixedPitch = fixed
     , ttAdvances = advances
-    , ttCmap = IM.filter (< numGlyphs) cmap
+    , ttCmap = IM.filter (\g -> g > 0 && g < numGlyphs) cmap
     }
   where
-    check True _ = Right ()
-    check False e = Left e
-    sanitize s = case filter (\c -> isAlphaNum c || c `elem` ("-_." :: String)) s of
+    -- ASCII only: the other characters are not written as they are in a PDF name
+    sanitize s = case filter (\c -> isAscii c && (isAlphaNum c || c `elem` ("-_." :: String))) s of
       "" -> "TrueTypeFont"
       s' -> s'
 
@@ -199,8 +244,10 @@ postScriptName nt
 -- (Basic Multilingual Plane).
 parseCmap :: B.ByteString -> Either String (IM.IntMap Int)
 parseCmap cm = do
+  check (B.length cm >= 4) "short cmap table"
   let n = u16 cm 2
-      recs = [ (u16 cm o, u16 cm (o + 2), u32 cm (o + 4)) | i <- [0 .. n - 1], let o = 4 + 8 * i ]
+  check (B.length cm >= 4 + 8 * n) "short cmap table"
+  let recs = [ (u16 cm o, u16 cm (o + 2), u32 cm (o + 4)) | i <- [0 .. n - 1], let o = 4 + 8 * i ]
       sub off = B.drop off cm
       fmt off = u16 cm off
       unicode (p, e, _) = (p == 3 && (e == 1 || e == 10)) || p == 0
@@ -208,45 +255,66 @@ parseCmap cm = do
       f12 = [ off | off <- candidates, fmt off == 12 ]
       f4 = [ off | off <- candidates, fmt off == 4 ]
   case (f12, f4) of
-    (off : _, _) -> Right (format12 (sub off))
-    (_, off : _) -> Right (format4 (sub off))
+    (off : _, _) -> format12 (sub off)
+    (_, off : _) -> format4 (sub off)
     _ -> Left "no Unicode cmap subtable in format 4 or 12"
 
-format4 :: B.ByteString -> IM.IntMap Int
-format4 t =
-  let segX2 = u16 t 6
-      seg = segX2 `div` 2
-      endAt i = u16 t (14 + 2 * i)
-      startAt i = u16 t (16 + segX2 + 2 * i)
-      deltaAt i = u16 t (16 + 2 * segX2 + 2 * i)
-      rangeOffPos i = 16 + 3 * segX2 + 2 * i
-      gidFor i c
-        | ro == 0 = (c + deltaAt i) .&. 0xFFFF
-        | otherwise =
-            let addr = rangeOffPos i + ro + 2 * (c - startAt i)
-                g = if addr + 1 < B.length t then u16 t addr else 0
-             in if g == 0 then 0 else (g + deltaAt i) .&. 0xFFFF
-        where ro = u16 t (rangeOffPos i)
-   in IM.fromList
-        [ (c, g)
-        | i <- [0 .. seg - 1]
-        , c <- [startAt i .. endAt i]
-        , c /= 0xFFFF
-        , let g = gidFor i c
-        , g /= 0 ]
+format4 :: B.ByteString -> Either String (IM.IntMap Int)
+format4 t
+  | B.length t < 14 || B.length t < 16 + 4 * segX2 = Left "short cmap subtable (format 4)"
+  | otherwise = Right $ IM.fromList
+      [ (c, g)
+      | (s, e, i) <- increasing_ranges [ (startAt i, endAt i, i) | i <- [0 .. seg - 1] ]
+      , c <- [s .. e]
+      , c /= 0xFFFF
+      , let g = gidFor i c
+      , g /= 0 ]
+  where
+    segX2 = u16 t 6
+    seg = segX2 `div` 2
+    endAt i = u16 t (14 + 2 * i)
+    startAt i = u16 t (16 + segX2 + 2 * i)
+    deltaAt i = u16 t (16 + 2 * segX2 + 2 * i)
+    rangeOffPos i = 16 + 3 * segX2 + 2 * i
+    gidFor i c
+      | ro == 0 = (c + deltaAt i) .&. 0xFFFF
+      | otherwise =
+          let g = u16 t (rangeOffPos i + ro + 2 * (c - startAt i))
+           in if g == 0 then 0 else (g + deltaAt i) .&. 0xFFFF
+      where ro = u16 t (rangeOffPos i)
 
-format12 :: B.ByteString -> IM.IntMap Int
-format12 t =
-  let groups = u32 t 12
-   in IM.fromList
-        [ (c, sg + (c - s))
-        | i <- [0 .. groups - 1]
-        , let o = 16 + 12 * i
-        , o + 12 <= B.length t
-        , let s = u32 t o
-              e = u32 t (o + 4)
-              sg = u32 t (o + 8)
-        , c <- [s .. min e 0x10FFFF] ]
+format12 :: B.ByteString -> Either String (IM.IntMap Int)
+format12 t
+  | B.length t < 16 || (B.length t - 16) `div` 12 < groups = Left "short cmap subtable (format 12)"
+  | otherwise = Right $ IM.fromList
+      [ (c, sg + (c - s))
+      | (s, e, sg) <- increasing_ranges
+          [ (u32 t o, min (u32 t (o + 4)) 0x10FFFF, u32 t (o + 8))
+          | i <- [0 .. groups - 1], let o = 16 + 12 * i ]
+      , c <- [s .. e] ]
+  where
+    groups = u32 t 12
+
+-- Note [Ranges of a cmap subtable]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The segments (format 4) and the groups (format 12) of a cmap subtable are
+-- ranges of character codes, in increasing order and without overlap. The
+-- readers ignore a range that does not start after the end of the range
+-- before it. Each character code is then read one time at most, so a
+-- malformed font cannot make the work larger than the code space.
+--
+-- Example: 10000 groups that are all [0 .. 0x10FFFF]. Only the first group
+-- is read: 0x110000 codes, and not 10000 times as many.
+
+-- | The ranges (start, end, data) that are not empty and that start after
+-- the end of the range before them. See Note [Ranges of a cmap subtable]
+increasing_ranges :: [(Int, Int, a)] -> [(Int, Int, a)]
+increasing_ranges = go (-1)
+  where
+    go _ [] = []
+    go prev (r@(s, e, _) : rest)
+      | s > prev && s <= e = r : go e rest
+      | otherwise = go prev rest
 
 -- Metrics ----------------------------------------------------------------
 
@@ -274,20 +342,20 @@ instance IsFont TrueTypeFontData where
   glyphCodeBytes _ = 2
 
 instance IsFont TrueTypeFont where
-  name (TrueTypeFont d _) = name d
-  getDescent (TrueTypeFont d _) = getDescent d
-  getHeight (TrueTypeFont d _) = getHeight d
-  getKern (TrueTypeFont d _) = getKern d
-  glyphWidth (TrueTypeFont d _) = glyphWidth d
-  hyphenGlyph (TrueTypeFont d _) = hyphenGlyph d
-  spaceGlyph (TrueTypeFont d _) = spaceGlyph d
-  charGlyph (TrueTypeFont d _) = charGlyph d
+  name = tfName
+  getDescent = getDescent . tfData
+  getHeight = getHeight . tfData
+  getKern = getKern . tfData
+  glyphWidth = glyphWidth . tfData
+  hyphenGlyph = hyphenGlyph . tfData
+  spaceGlyph = spaceGlyph . tfData
+  charGlyph = charGlyph . tfData
   glyphCodeBytes _ = 2
 
 -- | The font dictionary is an indirect object, written once however many
 -- pages use the font.
 instance PdfResourceObject TrueTypeFont where
-  toRsrc (TrueTypeFont _ type0) = AnyPdfObject type0
+  toRsrc = AnyPdfObject . tfType0
 
 -- Embedding --------------------------------------------------------------
 
@@ -318,22 +386,25 @@ mkTrueTypeFont = mkTrueTypeFontWith EmbedSubset
 -- functions call.
 mkTrueTypeFontWith :: TrueTypeEmbedding -> TrueTypeFontData -> PDF AnyFont
 mkTrueTypeFontWith mode d = do
-  type0 <- addObject emptyDictionary
+  type0@(PDFReference n) <- addObject emptyDictionary
+  -- See Note [Name of an embedded TrueType font]
+  let font_name = ttPsName d ++ "_" ++ show n
   case mode of
-    EmbedWhole -> writeTrueTypeFont d Nothing type0
+    EmbedWhole -> writeTrueTypeFont d font_name Nothing type0
     EmbedSubset ->
-      let finalize used = writeTrueTypeFont d (Just (M.findWithDefault IS.empty (ttPsName d) used)) type0
+      let finalize used = writeTrueTypeFont d font_name (Just (M.findWithDefault IS.empty font_name used)) type0
        in modifyStrict $ \s -> s {fontFinalizers = finalize : fontFinalizers s}
-  pure (AnyFont (TrueTypeFont d type0))
+  pure (AnyFont (TrueTypeFont d font_name type0))
 
 -- | Writes the font's objects and fills in its Type0 dictionary. @Nothing@
--- embeds the whole font; @Just gs@ a subset with the glyphs @gs@.
-writeTrueTypeFont :: TrueTypeFontData -> Maybe IS.IntSet -> PDFReference PDFDictionary -> PDF ()
-writeTrueTypeFont d subset type0 = do
+-- embeds the whole font; @Just gs@ a subset with the glyphs @gs@. The name
+-- of the font in the document makes the subset tags of two fonts different.
+writeTrueTypeFont :: TrueTypeFontData -> String -> Maybe IS.IntSet -> PDFReference PDFDictionary -> PDF ()
+writeTrueTypeFont d font_name subset type0 = do
   let (program, glyphs, baseName) = case subset of
         Nothing -> (ttBytes d, Nothing, ttPsName d)
         Just used -> case subsetTrueType (ttBytes d) used of
-          Right (bytes, kept) -> (bytes, Just kept, subsetTag (ttPsName d) kept ++ "+" ++ ttPsName d)
+          Right (bytes, kept) -> (bytes, Just kept, subsetTag font_name kept ++ "+" ++ ttPsName d)
           -- a font this module parsed but cannot subset: embed it whole
           Left _ -> (ttBytes d, Nothing, ttPsName d)
   fontFile <- createContent (embed program [entry "Length1" (PDFInteger (B.length program))]) Nothing
@@ -398,9 +469,7 @@ widthArray d glyphs = concat [ [AnyPdfObject (PDFInteger g0), AnyPdfObject (map 
 subsetTag :: String -> IS.IntSet -> String
 subsetTag psName glyphs = take 6 (letters h0)
   where
-    fnv :: Word64 -> Int -> Word64
-    fnv acc x = (acc `xor` fromIntegral x) * 1099511628211
-    h0 = foldl' fnv 14695981039346656037 (map ord psName ++ IS.toList glyphs)
+    h0 = foldl' fnv1a64Step fnv1a64OffsetBasis (map fromIntegral (map ord psName ++ IS.toList glyphs))
     letters h = chr (ord 'A' + fromIntegral (h `mod` 26)) : letters (h `div` 26)
 
 -- | A CMap from two-byte glyph ids to UTF-16BE, for text extraction, for
@@ -437,6 +506,32 @@ toUnicodeCMap d glyphs =
     chunks _ [] = []
     chunks k xs = let (a, b) = splitAt k xs in a : chunks k b
 
+-- Note [Shared last advance in hmtx]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The hmtx table has numberOfHMetrics (advance, lsb) entries, then one lsb
+-- for each remaining glyph: those glyphs all take the advance of the last
+-- entry. So the last entry cannot be changed, even when its own glyph is not
+-- in the subset.
+--
+-- Example: numberOfHMetrics = 4 (DejaVu Sans Mono), subset keeps glyph 36.
+-- Entries 0 to 3 are copied as they are, and glyph 36 keeps its advance.
+-- With entry 3 set to zero, glyph 36 would get advance 0 in the font
+-- program, but /W would give its true advance.
+
+-- Note [Glyph data of a malformed loca table]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- The loca table gives the place of each glyph in the glyf table, and its
+-- offsets must be in increasing order: the glyphs do not overlap. A subset
+-- copies the data of each glyph that it keeps. Without the order, many
+-- glyphs can have the same large data, and the subset is much larger than
+-- the font.
+--
+-- Example: loca = [0, L, 0, L, ...] and a composite glyph made of all the
+-- glyphs. The subset of a font of 72 KB was 96 MB.
+--
+-- 'subsetTrueType' returns Left for such a font, and the whole font is
+-- embedded as it is.
+
 -- Subsetting -------------------------------------------------------------
 
 -- | A subset of a TrueType font file that keeps the given glyphs, glyph 0
@@ -449,16 +544,9 @@ toUnicodeCMap d glyphs =
 -- Returns the font file and the glyphs it kept.
 subsetTrueType :: B.ByteString -> IS.IntSet -> Either String (B.ByteString, IS.IntSet)
 subsetTrueType bs wanted = do
-  check (B.length bs >= 12) "file too short"
-  let numTables = u16 bs 4
-      dir = M.fromList
-        [ (C.unpack (B.take 4 (B.drop o bs)), (u32 bs (o + 8), u32 bs (o + 12)))
-        | i <- [0 .. numTables - 1], let o = 12 + 16 * i, o + 16 <= B.length bs ]
-      table t = case M.lookup t dir of
-        Just (off, len) | off + len <= B.length bs -> Right (B.take len (B.drop off bs))
-        Just _ -> Left ("table " ++ t ++ " runs past the end of the file")
-        Nothing -> Left ("no " ++ t ++ " table")
-      optTable t = either (const Nothing) Just (table t)
+  dir <- sfntTables bs
+  let table t = maybe (Left ("no " ++ t ++ " table")) Right (M.lookup t dir)
+      optTable t = M.lookup t dir
   hd <- table "head"
   hh <- table "hhea"
   mx <- table "maxp"
@@ -472,7 +560,11 @@ subsetTrueType bs wanted = do
       locaAt g
         | longLoca = u32 lc (4 * g)
         | otherwise = 2 * u16 lc (2 * g)
+  check (numGlyphs > 0) "no glyph"
   check (B.length lc >= (if longLoca then 4 else 2) * (numGlyphs + 1)) "short loca table"
+  -- See Note [Glyph data of a malformed loca table]
+  let locas = map locaAt [0 .. numGlyphs]
+  check (and (zipWith (<=) locas (drop 1 locas))) "loca table is not in increasing order"
   check (nH > 0 && B.length hm >= 4 * nH + 2 * (numGlyphs - min nH numGlyphs)) "short hmtx table"
   let glyphData g
         | g < 0 || g >= numGlyphs = B.empty
@@ -490,9 +582,9 @@ subsetTrueType bs wanted = do
       lsbOf g
         | g < nH = i16 hm (4 * g + 2)
         | otherwise = i16 hm (4 * nH + 2 * (g - nH))
-      hmtx' = B.concat $
-        [ if IS.member g kept then B.take 4 (B.drop (4 * g) hm) else be16 0 <> be16 0 | g <- [0 .. nH' - 1] ]
-          ++ [ be16 (if IS.member g kept then lsbOf g else 0) | g <- [nH' .. newN - 1] ]
+      -- See Note [Shared last advance in hmtx]
+      hmtx' = B.take (4 * nH') hm
+        <> B.concat [ be16 (if IS.member g kept then lsbOf g else 0) | g <- [nH' .. newN - 1] ]
       head' = patch 8 (be32 0) (patch 50 (be16 1) hd)
       hhea' = patch 34 (be16 nH') hh
       maxp' = patch 4 (be16 newN) mx
@@ -501,27 +593,24 @@ subsetTrueType bs wanted = do
         , ("loca", loca'), ("maxp", maxp') ]
           ++ [ (t, b) | t <- ["cvt ", "fpgm", "prep"], Just b <- [optTable t] ]
   pure (writeSfnt tables, kept)
-  where
-    check True _ = Right ()
-    check False e = Left e
 
 -- | The glyph ids a glyph of a font file is built from, when it is a
 -- composite glyph (none for a simple glyph, or a glyph id out of range).
 trueTypeGlyphComponents :: B.ByteString -> Int -> [Int]
 trueTypeGlyphComponents bs g = either (const []) id $ do
-  let numTables = u16 bs 4
-      dir = M.fromList
-        [ (C.unpack (B.take 4 (B.drop o bs)), (u32 bs (o + 8), u32 bs (o + 12)))
-        | i <- [0 .. numTables - 1], let o = 12 + 16 * i, o + 16 <= B.length bs ]
-      table t = maybe (Left t) (\(off, len) -> Right (B.take len (B.drop off bs))) (M.lookup t dir)
+  dir <- sfntTables bs
+  let table t = maybe (Left t) Right (M.lookup t dir)
   hd <- table "head"
   mx <- table "maxp"
   lc <- table "loca"
   gl <- table "glyf"
-  let locaAt i = if i16 hd 50 /= 0 then u32 lc (4 * i) else 2 * u16 lc (2 * i)
-  if g < 0 || g >= u16 mx 4
+  let longLoca = B.length hd >= 52 && i16 hd 50 /= 0
+      locaAt i = if longLoca then u32 lc (4 * i) else 2 * u16 lc (2 * i)
+      a = locaAt g
+      b = locaAt (g + 1)
+  if g < 0 || g >= u16 mx 4 || b <= a || b > B.length gl
     then Right []
-    else Right (glyphComponents (B.take (locaAt (g + 1) - locaAt g) (B.drop (locaAt g) gl)))
+    else Right (glyphComponents (B.take (b - a) (B.drop a gl)))
 
 -- | The glyphs reachable from a set through a successor function.
 closure :: (Int -> [Int]) -> Int -> IS.IntSet -> IS.IntSet

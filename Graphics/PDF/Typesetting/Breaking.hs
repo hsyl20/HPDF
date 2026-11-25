@@ -541,7 +541,7 @@ spaceWidth :: Style s => s -- ^ The style
            -> PDFFloat
 spaceWidth  s =  
     let PDFFont f fontSize = (textFont . textStyle $ s) 
-        ws = glyphWidth f fontSize (spaceGlyph f)
+        ws = spaceAdvance f fontSize
         h = scaleSpace . textStyle $ s
     in
       ws * h  
@@ -675,7 +675,11 @@ ripText s settings (NormalChar c:l) =
 splitText :: Style s => BRState -> s -> T.Text -> [Letter s]
 splitText settings f t  = 
    let w = writingSystem settings
-       special = mapToSpecialGlyphs w t
+       PDFFont font _ = textFont (textStyle f)
+       -- See Note [Characters that have no glyph to show] in Graphics.PDF.Fonts.Font
+       shown (NormalChar c) = shownChar font c
+       shown _ = True
+       special = filter shown (mapToSpecialGlyphs w t)
    in 
    ripText f settings special
      

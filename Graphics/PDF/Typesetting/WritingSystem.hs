@@ -51,15 +51,29 @@ addHyphens hn f =
   where
     hyphenate = fmap T.pack . H.hyphenate hn . T.unpack
 
+-- Note [Soft hyphen]
+-- ~~~~~~~~~~~~~~~~~~
+-- The soft hyphen U+00AD is not a character to show: it is a place where a
+-- line can break. Between two characters of a text in a Latin writing
+-- system it becomes a 'BreakingHyphen', as the breaks that the hyphenation
+-- finds. In all other positions it is removed.
+--
+-- Example: "extra\173ordinary" is set as "extraordinary", or as "extra-"
+-- and "ordinary" on two lines.
+
+-- | See Note [Soft hyphen]
 mapToSpecialGlyphs :: WritingSystem -> T.Text -> [SpecialChar]
 mapToSpecialGlyphs UnknownWritingSystem theText = 
-  let getBreakingGlyphs (' ':l) = NormalSpace:getBreakingGlyphs l 
+  let getBreakingGlyphs ('\xAD':l) = getBreakingGlyphs l
+      getBreakingGlyphs (' ':l) = NormalSpace:getBreakingGlyphs l 
       getBreakingGlyphs (a:l) = NormalChar a:getBreakingGlyphs l 
       getBreakingGlyphs [] = []
   in getBreakingGlyphs (T.unpack theText)
 mapToSpecialGlyphs (Latin hn) theText =
   let getBreakingGlyphs [] = []
       getBreakingGlyphs (a:'/':'-':d:l) = (NormalChar a):BreakingHyphen:getBreakingGlyphs (d:l)
+      getBreakingGlyphs (a:'\xAD':d:l) | a /= ' ' && a /= '\xAD' && d /= '\xAD' = (NormalChar a):BreakingHyphen:getBreakingGlyphs (d:l)
+      getBreakingGlyphs ('\xAD':l) = getBreakingGlyphs l
       getBreakingGlyphs (',':' ':l) = NormalChar ',':BiggerSpace:getBreakingGlyphs l
       getBreakingGlyphs (';':' ':l) = NormalChar ';':BiggerSpace:getBreakingGlyphs l
       getBreakingGlyphs ('.':' ':l) = NormalChar '.':BiggerSpace:getBreakingGlyphs l
