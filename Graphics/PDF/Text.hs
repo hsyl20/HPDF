@@ -51,7 +51,7 @@ import Control.Monad (unless)
 import qualified Data.Set as Set
 import qualified Data.Map.Strict as M
 import qualified Data.IntSet as IS
-import Data.List(foldl')
+import qualified Data.List as List (foldl')
 import Data.Binary.Builder(Builder)
 import Graphics.PDF.LowLevel.Serializer
 import qualified Data.ByteString as S
@@ -65,9 +65,9 @@ glyphStreamWidth :: PDFFont
                  -> PDFFloat
 glyphStreamWidth (PDFFont f s) (PDFGlyph t) = 
  let gs = decodeGlyphs f t
-     w = foldl' (\a b -> a + glyphWidth f s b) 0 gs
+     w = List.foldl' (\a b -> a + glyphWidth f s b) 0 gs
  in
-  w + (foldl' (\a (x,y) -> a + getKern f s x y) 0 $ zip gs (drop 1 gs))
+  w + (List.foldl' (\a (x,y) -> a + getKern f s x y) 0 $ zip gs (drop 1 gs))
 
 textWidth :: PDFFont -> T.Text -> PDFFloat
 textWidth f t = glyphStreamWidth f . pdfGlyph f $ t

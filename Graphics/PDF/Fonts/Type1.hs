@@ -86,8 +86,8 @@ parseAfmData :: B.ByteString -> Either ParseError AFMData
 parseAfmData bs = second AFMData $ parseAfm "<bytestring>" bs
 
 mkType1FontStructure :: Encodings -> FontData -> AFMData -> IO Type1FontStructure
-mkType1FontStructure encoding pfb (AFMData f)  = do
-  theEncoding <- getEncoding encoding
+mkType1FontStructure enc pfb (AFMData f)  = do
+  theEncoding <- getEncoding enc
   let theFont = (fontToStructure f theEncoding Nothing)
                   { symbolic = sym, nonSymbolic = not sym }
       sym = encodingScheme f /= AFMAdobeStandardEncoding

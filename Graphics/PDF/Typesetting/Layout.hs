@@ -42,7 +42,7 @@ import Graphics.PDF.Draw
 import Graphics.PDF.Coordinates
 import Graphics.PDF.Shapes(Rectangle(..))
 import Graphics.PDF.Typesetting.Box
-import Data.List(foldl')
+import qualified Data.List as List (foldl')
 import Data.Maybe(isJust,fromJust)
 
 
@@ -317,7 +317,7 @@ recurseStrokeVBoxes nb (a:l) xa y = do
 drawWithParaStyle :: (ParagraphStyle ps s) => ps -> [VBox ps s] -> PDFFloat -> PDFFloat -> Draw ()   
 drawWithParaStyle style b xa y' = do
     let  (l',l'') = span (isSameParaStyle style) b
-         h' = foldl' (\x' ny -> x' + boxHeight ny) 0.0 l'
+         h' = List.foldl' (\x' ny -> x' + boxHeight ny) 0.0 l'
     if (isJust . paragraphStyle $ style)
       then do
           let xleft = (minimum $ 100000:map getBoxDelta l' ) + xa

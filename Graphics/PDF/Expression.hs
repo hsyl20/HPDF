@@ -39,7 +39,7 @@ import qualified Control.Monad.RWS as MRWS
 import qualified Control.Monad.Writer as MW
 import qualified Control.Monad.State as MS
 import Control.Monad (when)
-import Control.Applicative (pure, liftA2, liftA3, (<*>))
+import Control.Applicative (liftA3)
 
 import Prelude hiding
         (not, min, max, log, sqrt, floor, ceiling, round, truncate)

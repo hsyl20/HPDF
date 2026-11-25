@@ -279,7 +279,7 @@ data ZList s = ZList (MaybeCB (Letter s)) (PDFFloat,PDFFloat,PDFFloat,Int,Letter
 
 createZList :: [Letter s] -> ZList s
 createZList [] = error "List cannot be empty to create a zipper"
-createZList l = ZList NoCB (0,0,0,1,head l) (tail l)
+createZList (x:l) = ZList NoCB (0,0,0,1,x) l
 
 theEnd :: ZList s -> Bool
 theEnd (ZList _ _ []) = True
@@ -313,17 +313,18 @@ getDim a = if theEnd a then error "Can't find end of paragraph" else getDim (mov
 
 
 moveRight :: ZList s -> ZList s
-moveRight (ZList _ c@(w,y,z,p,Glue w' y' z' _) r) = 
+moveRight (ZList _ _ []) = error "Can't move after the end of the paragraph"
+moveRight (ZList _ c@(w,y,z,p,Glue w' y' z' _) (n:r)) = 
     let w'' = w + w'
         y''=y+y'
         z''=z+z'
     in
-    ZList (OneCB c) (w'',y'',z'',p+1,head r) (tail r)
-moveRight (ZList _ c@(w,y,z,p,a) r) = 
+    ZList (OneCB c) (w'',y'',z'',p+1,n) r
+moveRight (ZList _ c@(w,y,z,p,a) (n:r)) = 
         let w' = glueSizeWithRatio a 0.0
             w'' = w + w'
         in
-        ZList (OneCB c) (w'',y,z,p+1,head r) (tail r)
+        ZList (OneCB c) (w'',y,z,p+1,n) r
      
 
 isFeasibleBreakpoint :: Bool -- ^ Second pass
@@ -425,7 +426,7 @@ analyzeBoxes settings pass fmaxw actives lastz z =
     let getMinBreak b' = (\((xc,yc,zc),w) -> (xc,yc,zc,w)) . minimumBy (\(_,a) (_,b) -> compare (demerit a) (demerit b)) . M.toList $ b'
         (breaks',actives') = getNewActiveBreakpoints settings pass fmaxw actives z 
         newActives = M.union (breaks') (actives')
-        getRightOrderNodeList = tail . reverse . genNodeList
+        getRightOrderNodeList = drop 1 . reverse . genNodeList
         getKey (a,b,c,_) = (a,b,c)
         getNode (_,_,_,BreakNode a b c d e f r _) = BreakNode a b c d e f r Nothing
     in
@@ -493,11 +494,11 @@ cutList j t c ((ra,ba,fa):l) =
       then
          []
       else 
-         if null t'
-             then
+         case t' of
+             [] ->
                  [(ra,theLine,t)]
-             else
-                 case head t' of
+             (next:_) ->
+                 case next of
                      FlaggedPenalty _ _ s -> if not fa 
                                                then
                                                   error $ "Breakpoint marked as not flagged but detected as flagged ! Send a bug report ! " ++ show (ra,ba,fa)
