@@ -116,6 +116,9 @@ import qualified Data.Text as T
 
 -- | Display a formatted text in a given bounding rectangle with a given default paragraph style, a given default text style. No clipping
 -- is taking place. Drawing stop when the last line is crossing the bounding rectangle in vertical direction
+--
+-- The text that does not fit in the rectangle is not drawn, and the caller
+-- is not told. Use 'displayFormattedTextIn' to get this text.
 displayFormattedText :: (ParagraphStyle ps s) => Rectangle -- ^ Text area
                      -> ps -- ^ default vertical style
                      -> s -- ^ Default horizontal style
