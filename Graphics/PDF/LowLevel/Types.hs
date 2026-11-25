@@ -32,8 +32,6 @@ import Data.Text.Encoding
 import qualified Data.Text as T
 import qualified Data.ByteString.Char8 as C
 import Data.Word 
-import Data.Char(ord)
-import Text.Printf(printf)
 
 {-
 
@@ -166,19 +164,25 @@ class HasHexaStream a where
   toHexaStream :: a -> S.ByteString 
 
 instance HasHexaStream S.ByteString where 
-    toHexaStream x  = 
-        let hexChar c = C.pack (printf "%02X" (ord c) :: String)
-        in
-        C.cons 'F' . C.cons 'E' . C.cons 'F' . C.cons 'F' . C.concatMap hexChar $ x
+    toHexaStream x = C.pack "FEFF" `S.append` upperHexBytes x
+
+-- | The bytes in hexadecimal, with the digits A to F in upper case: two
+-- digits for each byte.
+upperHexBytes :: S.ByteString -> S.ByteString
+upperHexBytes x = fst (S.unfoldrN (2 * S.length x) step 0)
+  where
+    -- The state is the index of the digit
+    step :: Int -> Maybe (Word8, Int)
+    step i =
+      let b = S.index x (i `quot` 2)
+          d = if even i then b `quot` 16 else b `rem` 16
+      in Just (if d < 10 then 0x30 + d else 0x37 + d, i + 1)
 
 instance HasHexaStream PDFString where 
   toHexaStream (PDFString x) = toHexaStream x
 
 instance HasHexaStream PDFGlyph where 
-  toHexaStream (PDFGlyph x) = 
-    let hexChar c = C.pack (printf "%02X" (ord c) :: String)
-        in
-        C.concatMap hexChar $ x
+  toHexaStream (PDFGlyph x) = upperHexBytes x
 
 
 -- | A glyph code. Simple fonts (standard 14, Type1) use one byte per glyph
