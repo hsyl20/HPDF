@@ -26,7 +26,6 @@ extra-source-files:
   Test/pdfa.hs
   Test/sign.hs
   README.md
-  TODO.txt
   changelog.md
   Core14_AFMs/Courier-Bold.afm
   Core14_AFMs/Helvetica-BoldOblique.afm
