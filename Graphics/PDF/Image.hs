@@ -28,6 +28,13 @@ module Graphics.PDF.Image(
    , readJpegDataURL
    , createPDFRawImageFromARGB
    , createPDFRawImageFromByteString
+   -- ** PNG images
+   , PDFPng
+   , PngFile
+   , readPngFile
+   , parsePng
+   , pngBounds
+   , createPDFPng
  ) where
      
 import Graphics.PDF.LowLevel.Types
@@ -50,6 +57,9 @@ import qualified Control.Monad.Except as EXC
 import qualified Control.Monad.Error as EXC
 #endif
 import Graphics.PDF.Coordinates
+import Graphics.PDF.LowLevel.PNG
+import Graphics.PDF.LowLevel.Serializer (serialize)
+import qualified Data.ByteString as S
 import Data.Binary.Builder(Builder,fromLazyByteString,fromByteString)
 import Control.Exception as E
 import qualified Data.Vector.Unboxed as U
@@ -515,5 +525,101 @@ instance PdfLengthInfo RawImage where
 instance PdfResourceObject (PDFReference RawImage) where
   toRsrc = AnyPdfObject
 
+-- | A PNG image of a document
+data PDFPng
 
+instance PDFXObject PDFPng where
+    drawXObject a = withNewContext $ do
+            (width,height) <- bounds a
+            applyMatrix (scale width height)
+            privateDrawXObject a
+
+instance PdfObject PDFPng where
+  toPDF _ = noPdfObject
+
+instance PdfLengthInfo PDFPng where
+
+instance PdfResourceObject (PDFReference PDFPng) where
+  toRsrc = AnyPdfObject
+
+-- | The content of a PNG file.
+-- See Note [PNG images] in Graphics.PDF.LowLevel.PNG
+newtype PngFile = PngFile PngImage
+
+-- | Read a PNG file. 'Left' gives the reason the file cannot be used.
+--
+-- All the colour types and numbers of bits of PNG are read, with their
+-- transparency. An interlaced image is read only if its samples have 8 or
+-- 16 bits.
+readPngFile :: FilePath -> IO (Either String PngFile)
+readPngFile path =
+    (parsePng <$> S.readFile path) `E.catch` (\(err :: IOException) -> return (Left (show err)))
+
+-- | Like 'readPngFile', with the bytes of the file.
+parsePng :: S.ByteString -> Either String PngFile
+parsePng = fmap PngFile . parsePngImage
+
+-- | Width and height of a PNG image, in pixels
+pngBounds :: PngFile -> (Int,Int)
+pngBounds (PngFile png) = (pngWidth png, pngHeight png)
+
+-- | Bytes of a palette, as a string in hexadecimal
+newtype HexBytes = HexBytes S.ByteString
+
+instance PdfObject HexBytes where
+  toPDF (HexBytes b) = mconcat [serialize '<', fromByteString (upperHexBytes b), serialize '>']
+
+instance PdfLengthInfo HexBytes where
+
+-- | Add a PNG image to the document. The image has the transparency of the
+-- file.
+--
+-- See Note [PNG images] in Graphics.PDF.LowLevel.PNG
+createPDFPng :: Monad m => PngFile -> PDFT m (PDFReference PDFPng)
+createPDFPng (PngFile png) = do
+    -- the alpha of the pixels is a second image, in gray
+    alpha_mask <- case pngAlpha png of
+      Nothing -> return []
+      Just alpha -> do
+        m <- createContent (image_stream (pngAlphaBits png) [entry "ColorSpace" (PDFName "DeviceGray")] alpha) Nothing
+        return [entry "SMask" m]
+    PDFReference s <- createContent (image_stream (pngBits png) (colour ++ predictor ++ key ++ alpha_mask) (pngData png)) Nothing
+    recordBound s (fromIntegral (pngWidth png)) (fromIntegral (pngHeight png))
+    return (PDFReference s)
+  where
+    components :: Int
+    components = case pngColour png of
+      PngRgb -> 3
+      _ -> 1
+    colour = case pngColour png of
+      PngGray -> [entry "ColorSpace" (PDFName "DeviceGray")]
+      PngRgb -> [entry "ColorSpace" (PDFName "DeviceRGB")]
+      PngIndexed palette ->
+        [entry "ColorSpace" [ AnyPdfObject (PDFName "Indexed"), AnyPdfObject (PDFName "DeviceRGB")
+                            , AnyPdfObject (PDFInteger (S.length palette `div` 3 - 1))
+                            , AnyPdfObject (HexBytes palette) ]]
+    -- the stream has the filter byte of each line: the PNG predictor
+    predictor
+      | pngPredictor png =
+          [entry "DecodeParms" (dictFromList
+            [ entry "Predictor" (PDFInteger 15)
+            , entry "Colors" (PDFInteger components)
+            , entry "BitsPerComponent" (PDFInteger (pngBits png))
+            , entry "Columns" (PDFInteger (pngWidth png)) ])]
+      | otherwise = []
+    -- a colour key: the pixels with this colour are not painted
+    key = case pngColourKey png of
+      Just values -> [entry "Mask" (map PDFInteger (concatMap (\v -> [v, v]) values))]
+      Nothing -> []
+    image_stream :: Int -> [(PDFName, AnyPdfObject)] -> B.ByteString -> Draw ()
+    image_stream bits entries stream = do
+      modifyStrict $ \st -> st {otherRsrcs = dictFromList $
+        [ entry "Type" (PDFName "XObject")
+        , entry "Subtype" (PDFName "Image")
+        , entry "Width" (PDFInteger (pngWidth png))
+        , entry "Height" (PDFInteger (pngHeight png))
+        , entry "BitsPerComponent" (PDFInteger bits)
+        , entry "Filter" (PDFName "FlateDecode")
+        ] ++ entries}
+      tell (fromLazyByteString stream)
 

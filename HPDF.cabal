@@ -76,7 +76,8 @@ Test-Suite HPDF-Tests
                      bytestring,
                      containers,
                      directory,
-                     text
+                     text,
+                     zlib
   Default-language:  Haskell2010
   
 Executable HPDF-Demo
@@ -129,7 +130,7 @@ library
       random >= 1.0, 
       bytestring >= 0.11, 
       array >= 0.1, 
-      zlib >= 0.5, 
+      zlib >= 0.6, 
       binary >= 0.4, 
       mtl,
       vector >=0.10,
@@ -178,6 +179,7 @@ library
   Other-Modules:
      Graphics.PDF.LowLevel.Types
      Graphics.PDF.LowLevel.Hash
+     Graphics.PDF.LowLevel.PNG
      Graphics.PDF.LowLevel.Signature
      Graphics.PDF.LowLevel.CMS
      Graphics.PDF.Data.PDFTree

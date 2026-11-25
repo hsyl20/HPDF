@@ -4,7 +4,8 @@
 # HPDF
 
 A PDF library with support for several pages, page transitions, outlines,
-annotations, compression, colors, shapes, patterns, jpegs, fonts, typesetting...
+annotations, compression, colors, shapes, patterns, JPEG and PNG images, fonts,
+typesetting...
 
 Have a look at the "Graphics.PDF.Documentation" module to see how to use it. 
 
