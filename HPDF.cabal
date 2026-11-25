@@ -25,6 +25,7 @@ extra-source-files:
   Test/test.hs
   Test/unicode.hs
   Test/pdfa.hs
+  Test/sign.hs
   README.md
   TODO.txt
   changelog.md
@@ -92,6 +93,14 @@ Executable HPDF-Unicode-Demo
                      directory
   Default-language:  Haskell2010
 
+Executable HPDF-Sign-Demo
+  Main-is:           sign.hs
+  hs-source-dirs:    Test
+  Build-depends:     base >= 4,
+                     HPDF,
+                     bytestring
+  Default-language:  Haskell2010
+
 Executable HPDF-PDFA-Demo
   Main-is:           pdfa.hs
   hs-source-dirs:    Test
@@ -120,7 +129,11 @@ library
       parsec >=3.1.9,
       filepath >= 1.4.0,
       file-embed,
-      hyphenation
+      hyphenation,
+      crypton >= 2.2,
+      crypton-x509 >= 1.9,
+      crypton-x509-store >= 1.9,
+      ram
   Default-language:  Haskell2010
 
   ghc-options: -Wall -funbox-strict-fields -O
@@ -149,9 +162,12 @@ library
      Graphics.PDF.Typesetting
      Graphics.PDF.Documentation
      Graphics.PDF.Archive
+     Graphics.PDF.Signature
   Other-Modules:
      Graphics.PDF.LowLevel.Types
      Graphics.PDF.LowLevel.Hash
+     Graphics.PDF.LowLevel.Signature
+     Graphics.PDF.LowLevel.CMS
      Graphics.PDF.Data.PDFTree
      Graphics.PDF.Data.Trie
      Graphics.PDF.Pages

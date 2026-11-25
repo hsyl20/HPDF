@@ -79,6 +79,18 @@ jobs:
     - name: Run the demo
       run: cabal run HPDF-demo
 
+    # openssl makes a key and a certificate; pdfsig (poppler) verifies the
+    # signature of the document.
+    - name: Sign a document and verify the signature
+      run: |
+        sudo apt-get install -y poppler-utils
+        openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem \
+          -out certificates.pem -days 2 -subj "/CN=HPDF CI"
+        cabal run HPDF-Sign-Demo -- key.pem certificates.pem
+        pdfsig signed.pdf | tee pdfsig.txt
+        grep -q 'Signature Validation: Signature is Valid' pdfsig.txt
+        grep -q 'Total document signed' pdfsig.txt
+
     # veraPDF is the reference validator for PDF/A. One GHC version is enough:
     # the bytes of the document do not depend on the compiler.
     - name: Validate the PDF/A demo with veraPDF

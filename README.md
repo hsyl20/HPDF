@@ -50,6 +50,31 @@ conforming (a standard 14 font, which is not embedded). `writePdf` and
 `renderPdf` raise an exception for such a document: they do not write it.
 `cabal run HPDF-PDFA-Demo -- font.ttf sRGB.icc` writes `pdfa.pdf`.
 
+## Digital signatures
+
+`Graphics.PDF.Signature` adds a signature field and signs the rendered
+document with a key and its certificate (a detached CMS signature with
+SHA-256; RSA keys and EC keys on a named curve).
+
+```haskell
+import Graphics.PDF.Signature
+
+doc = do
+  page <- addPage Nothing
+  addSignature page signature { sigName = "A. Signer", sigReason = "Approval" }
+
+main = do
+  Right signer <- readSigner "key.pem" "certificates.pem"
+  signed <- signPdfWith signer (renderPdf standardDocInfo rect doc)
+  either fail (B.writeFile "signed.pdf") signed
+```
+
+For a key that the program cannot read (a smart card, an HSM, a signing
+service), `signPdf` gives the bytes to sign to your function instead.
+
+A document has one signature, and the signature field is not visible. See
+`HPDF-Sign-Demo` (Test/sign.hs).
+
 ## Documentation
 
 The library documentation can be accessed on [Hackage](https://hackage.haskell.org/package/HPDF)

@@ -478,6 +478,8 @@ data PdfBuilder = PdfBuilder { supplySrc :: !Int -- ^ Supply of unique identifie
                          , fontFinalizers :: [M.Map String IS.IntSet -> PDF ()] -- ^ Run when the document is saved, with the glyph ids every stream used per font name (font subsetting)
                          , pdfaSettings :: Maybe PDFA -- ^ Write the document as PDF/A (see "Graphics.PDF.Archive")
                          , associatedFiles :: [(T.Text, String, PDFReference PDFDictionary)] -- ^ Embedded files: name, MIME type and file specification, most recent first
+                         , signatureValues :: [Int] -- ^ Signature dictionaries. See Note [Signature of a document] in Graphics.PDF.Signature
+                         , signatureFields :: [Int] -- ^ Signature fields that are written
                          , documentProblems :: [String] -- ^ Why the document does not conform to what was asked of it (PDF/A), found when it is saved
                          }
                          
