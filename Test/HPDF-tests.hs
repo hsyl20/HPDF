@@ -764,6 +764,34 @@ test_pdfaDeviceColours = do
 attach :: String -> PDF ()
 attach n = () <$ embedAssociatedFile (associatedFile (T.pack n) "text/xml" (BL.fromStrict (C.pack "<x/>")))
 
+-- The font dictionary of a standard font is one object, and each page
+-- refers to it.
+-- See Note [Font dictionaries are indirect objects] in Graphics.PDF
+test_fontDictionaryIsShared :: IO ()
+test_fontDictionaryIsShared = do
+  Right courier <- mkStdFont Courier
+  Right times <- mkStdFont Times_Roman
+  let pdf = BL.toStrict $ renderPdf standardDocInfo {compressed = False} (PDFRect 0 0 300 200) $ do
+        mapM_ (const (onePage [courier, times])) [1 :: Int, 2, 3]
+        onePage [courier]
+      onePage fonts = do
+        page <- addPage Nothing
+        drawWithPage page $ mapM_ (\f -> drawText (text (PDFFont f 12) 10 10 (T.pack "text"))) fonts
+      count x = occurrences (C.pack x) pdf
+      occurrences pat b = case BS.breakSubstring pat b of
+        (_, r) | BS.null r -> 0 :: Int
+               | otherwise -> 1 + occurrences pat (BS.drop (BS.length pat) r)
+  assertEqual 1 (count "/BaseFont /Courier\n")
+  assertEqual 1 (count "/BaseFont /Times-Roman\n")
+  -- the pages refer to the two objects
+  assertBool (not (C.pack "/Courier <<" `BS.isInfixOf` pdf))
+  case [ w | l <- C.lines pdf, (k : w@[_, _, _]) <- [C.words l], k == C.pack "/Courier" ] of
+    refs@(r : _) -> do
+      assertEqual 4 (length refs)
+      assertBool (all (== r) refs)
+      assertEqual [C.pack "0", C.pack "R"] (drop 1 r)
+    [] -> assertFailure "no reference to the font"
+
 -- /F is a byte string (PDFDocEncoding), /UF a text string.
 test_filespecNames :: IO ()
 test_filespecNames = do

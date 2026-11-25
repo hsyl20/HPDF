@@ -11,6 +11,12 @@
      names are kept as deprecated aliases
    * Add a step by step interface: `emptyPdfBuilder`, `stepPDF`, `stepPDFT`
      and `buildPdf`
+   * The font dictionary of a standard or Type 1 font is written one time
+     as an indirect object, and no longer in the resources of each page
+     (#5). Documents that use these fonts have different bytes (and are
+     smaller); they are displayed as before. `pdffonts` no longer reports
+     an internal error for them.
+
    * Export the `PdfBuilder` type (abstractly)
    * `newSection` and `newSectionWithPage` return the result of their
      contents: their type is now `... -> PDFT m a -> PDFT m a` (#12)
