@@ -443,19 +443,22 @@ uniqueKeys = snd . mapAccumL pick Set.empty
 -- needs an RGB profile, DeviceCMYK needs a CMYK profile, DeviceGray needs
 -- any profile.
 --
--- The colour operators of "Graphics.PDF.Colors" write DeviceRGB colours, so
--- the profile must be an RGB profile. A DeviceCMYK image (a CMYK JPEG) is
--- then a problem.
+-- HPDF accepts only an RGB profile for the output intent. A DeviceCMYK
+-- image (a CMYK JPEG) and a CMYK colour ('Cmyk') are then problems. A gray
+-- colour is permitted.
 
--- | Records a problem when an image is DeviceCMYK.
+-- | Records a problem when an image is DeviceCMYK, or when a stream has a
+-- CMYK colour.
 -- See Note [Device colours in a PDF/A document]
 checkDeviceColours :: PDF ()
 checkDeviceColours = do
   ss <- gets (map (otherRsrcs . fst . snd) . IM.elems . streams)
   let is_cmyk (PDFDictionary d) =
         fmap (toLazyByteString . toPDF) (M.lookup (PDFName "ColorSpace") d) == Just (LC.pack "/DeviceCMYK")
+  cmyk <- gets (any (cmykColours . fst . snd) . IM.elems . streams)
   modifyStrict $ \s -> s {documentProblems = documentProblems s ++
-    [ "PDF/A: an image is DeviceCMYK; the output intent is an RGB profile" | any is_cmyk ss ]}
+    [ "PDF/A: an image is DeviceCMYK; the output intent is an RGB profile" | any is_cmyk ss ] ++
+    [ "PDF/A: a CMYK colour is used; the output intent is an RGB profile" | cmyk ]}
 
 -- | Records a problem for each font a stream uses whose program is not in
 -- the document (see 'fontEmbedded'): the document cannot be PDF/A.

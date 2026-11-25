@@ -783,6 +783,62 @@ test_numbersThatAreNotFinite = do
   assertBool =<< doesFileExist path
   removeFile path
 
+-- A colour is written with the operators of its device colour space.
+-- See Note [Device colours] in Graphics.PDF.Draw
+test_deviceColours :: IO ()
+test_deviceColours = do
+  Right helvetica <- mkStdFont Helvetica
+  let rect = PDFRect 0 0 300 200
+      pdf = BL.toStrict $ renderPdf standardDocInfo {compressed = False} rect $ do
+        page <- addPage Nothing
+        newSection (T.pack "section") (Just (Cmyk 0 1 1 0)) Nothing $
+          drawWithPage page $ do
+            fillColor (Rgb 1 0 0.5) >> strokeColor (Rgb 0 0.25 1)
+            fillColor (Gray 0.5) >> strokeColor (Gray 0.25)
+            fillColor (Cmyk 0 1 0.5 0.25) >> strokeColor (Cmyk 1 0 0 0.5)
+            fillColor (Hsv 0 1 1)
+            drawText $ do
+              setFont (PDFFont helvetica 12)
+              fillColor (Gray 0.75)
+              strokeColor (Cmyk 0.5 0 0 0)
+              textStart 10 10
+              displayText (T.pack "text")
+      has x = assertBoolVerbose x (C.pack ("\n" ++ x ++ "\n") `BS.isInfixOf` pdf)
+  mapM_ has [ "1 0 0.5 rg", "0 0.25 1 RG", "0.5 g", "0.25 G", "0 1 0.5 0.25 k", "1 0 0 0.5 K", "1 0 0 rg"
+            , "0.75 g", "0.5 0 0 0 K" ]
+  -- the colour of an outline is an RGB colour: red for this CMYK colour
+  assertBool (C.pack "/C [1 0 0 ]" `BS.isInfixOf` pdf)
+
+-- A PDF/A document with an RGB output intent can use a gray, and cannot
+-- use a CMYK colour: in a drawing or in a text object.
+test_pdfaCmykColours :: IO ()
+test_pdfaCmykColours = withTestFont $ \_ d -> do
+  let rect = PDFRect 0 0 300 200
+      render drawing = renderPdfE standardDocInfo rect $ do
+        setPDFA (pdfa3b fakeIcc)
+        font <- mkTrueTypeFont d
+        page <- addPage Nothing
+        drawWithPage page (drawing font)
+      problems = either id (const [])
+      gray _ = fillColor (Gray 0.5) >> strokeColor (Gray 0.25)
+      cmyk _ = strokeColor (Cmyk 0 1 1 0)
+      cmykText font = drawText $ do
+        setFont (PDFFont font 12)
+        fillColor (Cmyk 0 1 1 0)
+        textStart 10 10
+        displayText (T.pack "text")
+      grayText font = drawText $ do
+        setFont (PDFFont font 12)
+        fillColor (Gray 0.5)
+        textStart 10 10
+        displayText (T.pack "text")
+  assertEqual [] (problems (render gray))
+  assertEqual [] (problems (render grayText))
+  mapM_ (\drawing -> case problems (render drawing) of
+          [problem] -> assertBool ("CMYK" `elem` words problem)
+          other -> assertFailure ("expected one problem, got " ++ show other))
+        [cmyk, cmykText]
+
 -- A document without a page is a problem, and not an exception when the
 -- bytes are read.
 test_documentWithoutPage :: IO ()

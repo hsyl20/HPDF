@@ -32,6 +32,7 @@ import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Resources
 import Control.Monad.Writer
 import Graphics.PDF.LowLevel.Serializer
+import Data.Binary.Builder (Builder)
             
 black :: Color
 black = Rgb 0 0 0  
@@ -83,47 +84,26 @@ setRGBColorSpace = tell . serialize $ "\n/DeviceRGB CS\n/DeviceRGB cs\n"
 -- | Select the filling color
 fillColor :: MonadPath m => Color -- ^ Filling color
           -> m ()
-fillColor (Rgb r g b) = do
-    tell . mconcat $ [ serialize "\n"
-                     , toPDF r
-                     , serialize ' '
-                     , toPDF g
-                     , serialize ' '
-                     , toPDF b
-                     , serialize " rg"
-                     ]
-                    
-fillColor (Hsv h s v) = do
-        let (r,g,b) = hsvToRgb (h,s,v)
-        tell . mconcat $ [ serialize "\n"
-                         , toPDF r
-                         , serialize ' '
-                         , toPDF g
-                         , serialize ' '
-                         , toPDF b
-                         , serialize " rg"
-                         ]
+fillColor = colour_operator "rg" "g" "k"
 
 -- | Select the drawing color
 strokeColor :: MonadPath m => Color -- ^ Drawing color
             -> m ()
-strokeColor (Rgb r g b) = do
-    tell . mconcat $ [ serialize "\n"
-                     , toPDF r
-                     , serialize ' '
-                     , toPDF g
-                     , serialize ' '
-                     , toPDF b
-                     , serialize " RG"
-                     ]
-strokeColor (Hsv h s v) = do
-    let (r,g,b) = hsvToRgb (h,s,v)
-    tell . mconcat $ [ serialize "\n"
-                     , toPDF r
-                     , serialize ' '
-                     , toPDF g
-                     , serialize ' '
-                     , toPDF b
-                     , serialize " RG"
-                     ]
+strokeColor = colour_operator "RG" "G" "K"
 
+-- | Write a colour with the operator of its device colour space.
+-- See Note [Device colours] in Graphics.PDF.Draw
+colour_operator :: MonadPath m => String -- ^ Operator for an RGB colour
+                -> String -- ^ Operator for a gray
+                -> String -- ^ Operator for a CMYK colour
+                -> Color
+                -> m ()
+colour_operator rgb gray cmyk colour = case colour of
+    Rgb r g b -> tell (operator [r, g, b] rgb)
+    Hsv h s v -> let (r, g, b) = hsvToRgb (h, s, v) in tell (operator [r, g, b] rgb)
+    Gray g -> tell (operator [g] gray)
+    Cmyk c m y k -> recordCmykColour >> tell (operator [c, m, y, k] cmyk)
+  where
+    operator :: [PDFFloat] -> String -> Builder
+    operator components name = mconcat $
+      serialize "\n" : concatMap (\x -> [toPDF x, serialize ' ']) components ++ [serialize name]
