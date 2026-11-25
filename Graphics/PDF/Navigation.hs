@@ -50,8 +50,8 @@ closeNew = do
 newSection :: Monad m => T.Text -- ^ Outline title
            -> Maybe Color -- ^ Outline color
            -> Maybe OutlineStyle -- ^Outline style
-           -> PDFT m ()
-           -> PDFT m ()
+           -> PDFT m a -- ^ Contents of the section
+           -> PDFT m a -- ^ Result of the contents
 newSection myS col style p = newSectionPrivate (toPDFString myS) col style Nothing p
 
 -- | Create a new outline section pointing to a given page
@@ -59,21 +59,22 @@ newSectionWithPage :: Monad m => T.Text -- ^ Outline title
                    -> Maybe Color -- ^ Outline color
                    -> Maybe OutlineStyle -- ^ Outline style
                    -> PDFReference PDFPage -- ^ Page reference
-                   -> PDFT m ()
-                   -> PDFT m ()
+                   -> PDFT m a -- ^ Contents of the section
+                   -> PDFT m a -- ^ Result of the contents
 newSectionWithPage myS col style page p = newSectionPrivate (toPDFString myS) col style (Just page) p
     
 newSectionPrivate :: Monad m => PDFString -- ^ Outline title
                   -> Maybe Color -- ^ Outline color
                   -> Maybe OutlineStyle -- ^Outline style
                   -> Maybe (PDFReference PDFPage)
-                  -> PDFT m ()
-                  -> PDFT m ()
+                  -> PDFT m a
+                  -> PDFT m a
 newSectionPrivate myS col style page p = do
        let newlevel = do
             startNew
-            p
+            a <- p
             closeNew
+            return a
        r <- gets firstOutline
        if isFirst r
         then do

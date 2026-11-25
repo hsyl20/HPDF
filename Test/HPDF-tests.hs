@@ -548,6 +548,18 @@ test_pdfaAnnotations = do
     Left [problem] -> assertBool ("annotation" `elem` words problem)
     other -> assertFailure ("expected one problem, got " ++ either show (const "a document") other)
 
+-- 'newSection' and 'newSectionWithPage' give the result of their contents.
+test_sectionResult :: IO ()
+test_sectionResult = do
+  ref <- newIORef (0 :: Int, 0 :: Int)
+  _ <- renderPdfT standardDocInfo (PDFRect 0 0 300 200) $ do
+    page <- addPage Nothing
+    a <- newSection (T.pack "a") Nothing Nothing $
+      newSection (T.pack "b") Nothing Nothing (return 1)
+    b <- newSectionWithPage (T.pack "c") Nothing Nothing page (return 2)
+    liftIO (writeIORef ref (a, b))
+  readIORef ref >>= assertEqual (1, 2)
+
 -- A document without a page is a problem, and not an exception when the
 -- bytes are read.
 test_documentWithoutPage :: IO ()
