@@ -42,6 +42,8 @@ module Graphics.PDF.Typesetting(
   -- * Functions
   -- ** Text display
   , displayFormattedText
+  , displayFormattedTextIn
+  , displayBoxes
   , styleFont
   -- ** Text construction operators
   , txt
@@ -130,6 +132,54 @@ displayFormattedText (Rectangle (xa :+ ya) (xb :+ yb)) defaultVStyle defaultHSty
             (d,_,_) = fillContainer (pageSettings s') c boxes
         d
         return a
+
+-- Note [Text in more than one rectangle]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- 'displayFormattedText' drops the text that does not fit in its rectangle.
+-- 'displayFormattedTextIn' and 'displayBoxes' fill a list of rectangles in
+-- order, and give the boxes that fit in none of them. These boxes can go to
+-- 'displayBoxes' again, for example on the next page:
+--
+--   rest <- drawWithPage page1 $ displayBoxes NormalParagraph [left, right] boxes
+--   _ <- drawWithPage page2 $ displayBoxes NormalParagraph [left, right] rest
+--
+-- A paragraph that is cut between two rectangles continues at the line
+-- where it stopped.
+
+-- | Display a formatted text in a list of rectangles: the text that does
+-- not fit in a rectangle continues in the next one. Also gives the boxes
+-- that fit in no rectangle; 'displayBoxes' can draw them in another place.
+--
+-- See Note [Text in more than one rectangle]
+displayFormattedTextIn :: (ParagraphStyle ps s) => [Rectangle] -- ^ Text areas, in the order of the text
+                       -> ps -- ^ default vertical style
+                       -> s -- ^ Default horizontal style
+                       -> TM ps s a -- ^ Typesetting monad
+                       -> Draw (a, [VBox ps s]) -- ^ Result, and the boxes that did not fit
+displayFormattedTextIn rects defaultVStyle defaultHStyle t = do
+    let (a, s', boxes) = (runRWS . unTM $ t) () (defaultTmState defaultVStyle defaultHStyle)
+    rest <- display_boxes (pageSettings s') rects boxes
+    return (a, rest)
+
+-- | Display boxes (see 'getBoxes') in a list of rectangles: the boxes that
+-- do not fit in a rectangle continue in the next one. Gives the boxes that
+-- fit in no rectangle.
+--
+-- See Note [Text in more than one rectangle]
+displayBoxes :: (ParagraphStyle ps s) => ps -- ^ default vertical style
+             -> [Rectangle] -- ^ Text areas, in the order of the text
+             -> [VBox ps s] -- ^ Boxes to display
+             -> Draw [VBox ps s] -- ^ The boxes that did not fit
+displayBoxes defaultVStyle = display_boxes (defaultVerState defaultVStyle)
+
+display_boxes :: (ParagraphStyle ps s) => VerState ps -> [Rectangle] -> [VBox ps s] -> Draw [VBox ps s]
+display_boxes _ _ [] = return []
+display_boxes _ [] boxes = return boxes
+display_boxes verstate (Rectangle (xa :+ ya) (xb :+ yb) : rects) boxes = do
+    let c = mkContainer xa yb (xb-xa) (yb-ya) 0
+        (d,_,rest) = fillContainer verstate c boxes
+    d
+    display_boxes verstate rects rest
  
 -- | Return the list of Vboxes for a text
 getBoxes :: (ParagraphStyle ps s) => ps -- ^ default vertical style

@@ -11,6 +11,12 @@ Have a look at the "Graphics.PDF.Documentation" module to see how to use it.
 Or, download the package and look at the test.hs file in the Test folder. That
 file is giving an example of each feature.
 
+## Text in more than one rectangle
+
+`displayFormattedTextIn` fills a list of rectangles in order, for example
+the columns of a page. It returns the boxes that did not fit, and
+`displayBoxes` draws them in another place, for example on the next page.
+
 ## Unicode text with embedded TrueType fonts
 
 The standard 14 fonts only cover Latin-1. To write other scripts (Greek,
