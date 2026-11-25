@@ -123,6 +123,12 @@
      the rendering raises an exception, and `writePdf` leaves no file.
      Before, "NaN" or "Infinity" was written in the document, which is
      not a PDF number. The library now depends on `directory`.
+   * Gray and CMYK colours: `Color` has two new constructors, `Gray` and
+     `Cmyk`. `fillColor` and `strokeColor` write them with the operators of
+     DeviceGray and DeviceCMYK. A PDF/A document cannot use a CMYK colour
+     (its output intent is an RGB profile): this is a problem of the
+     document. Code that matches on all the constructors of `Color` must
+     add the two cases.
 
 ## 1.8
 

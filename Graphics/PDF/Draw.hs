@@ -176,10 +176,37 @@ instance AnnotationObject AnyAnnotation where
     annotationDict (AnyAnnotation a) = annotationDict a
     
 
--- | A PDF color
-data Color = Rgb !Double !Double !Double
-           | Hsv !Double !Double !Double
+-- | A PDF color. Each component is between 0 and 1, but the hue of 'Hsv',
+-- which is an angle in degrees.
+--
+-- See Note [Device colours]
+data Color = Rgb !Double !Double !Double -- ^ Red, green, blue (DeviceRGB)
+           | Hsv !Double !Double !Double -- ^ Hue (0 to 360), saturation, value. It is written as an RGB colour
+           | Gray !Double -- ^ 0 is black, 1 is white (DeviceGray)
+           | Cmyk !Double !Double !Double !Double -- ^ Cyan, magenta, yellow, black (DeviceCMYK)
            deriving(Eq,Ord)
+
+-- Note [Device colours]
+-- ~~~~~~~~~~~~~~~~~~~~~
+-- 'Graphics.PDF.Colors.fillColor' and 'Graphics.PDF.Colors.strokeColor'
+-- write a colour with the operators of its device colour space:
+--
+--   Rgb 1 0 0         "1 0 0 rg"        Hsv is written as Rgb
+--   Gray 0.5          "0.5 g"
+--   Cmyk 0 1 1 0      "0 1 1 0 k"
+--
+-- A CMYK colour is for a printer: a reader converts it for a screen, and
+-- the result depends on the reader.
+--
+-- Some parts of a document take only an RGB colour: the colour of an
+-- outline, and the two colours of a shading. There, a gray is written as
+-- an RGB colour with three equal components, and a CMYK colour is
+-- converted with the simple formula of PDF 32000-1, 10.3.5
+-- (red = 1 - min 1 (cyan + black)), which does not use a colour profile.
+--
+-- A PDF/A document with an RGB output intent cannot use a CMYK colour:
+-- each stream records that it uses one ('cmykColours'), and this is then a
+-- problem of the document. A gray colour is permitted.
 
 data DrawState = DrawState {
                    supplyNames :: [String]
@@ -198,6 +225,7 @@ data DrawState = DrawState {
                 ,  usedGlyphs :: M.Map String IS.IntSet -- ^ Glyph ids shown with each subset font, by font name
                 ,  unembeddedFonts :: Set.Set String -- ^ Names of the fonts used whose program is not in the document
                 ,  streamFont :: Maybe PDFFont -- ^ Font of the graphics state. See Note [Font of a text object] in Graphics.PDF.Text
+                ,  cmykColours :: !Bool -- ^ The stream has a CMYK colour. See Note [Device colours]
                 }
 data DrawEnvironment = DrawEnvironment {
                         streamId :: Int
@@ -257,7 +285,8 @@ instance MonadWriter BU.Builder Draw where
 instance Functor Draw where
      fmap f = \m -> do { a <- m; return (f a) }
 
-instance MonadPath Draw
+instance MonadPath Draw where
+    recordCmykColour = modifyStrict $ \s -> s {cmykColours = True}
 
 readDrawST :: (forall s. DrawTuple s -> STRef s a) -> Draw a
 readDrawST   f   = Draw $ \env -> readSTRef   (f env) 
@@ -318,7 +347,7 @@ supplyName = do
 emptyDrawState :: Int -> DrawState
 emptyDrawState ref = 
     let names = (map (("O" ++ (show ref)) ++ ) $ [replicate k ['a'..'z'] | k <- [1..]] >>= sequence) in
-    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty Set.empty Nothing
+    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty Set.empty Nothing False
   
 -- | Execute the drawing commands to get a new state and an uncompressed PDF stream
 runDrawing :: Draw a -> DrawEnvironment -> DrawState -> (a,DrawState,BU.Builder)
@@ -833,10 +862,10 @@ instance PdfObject Destination where
 instance PdfLengthInfo Destination where
 
                                               
+-- | The colour as an array of three RGB components.
+-- See Note [Device colours]
 instance PdfObject Color where
-   toPDF (Rgb r g b) = toPDF [r,g,b]
-   toPDF (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v)
-    in toPDF [r,g,b]
+   toPDF c = let (r,g,b) = getRgbColor c in toPDF [r,g,b]
 
 instance PdfLengthInfo Color where
 
@@ -868,6 +897,9 @@ hsvToRgb (h,s,v) =
 getRgbColor :: Color -> (PDFFloat,PDFFloat,PDFFloat) 
 getRgbColor (Rgb r g b) = (r, g, b)  
 getRgbColor (Hsv h s v) = let (r,g,b) = hsvToRgb (h,s,v) in (r, g, b)  
+-- See Note [Device colours]
+getRgbColor (Gray g) = (g, g, g)
+getRgbColor (Cmyk c m y k) = (1 - min 1 (c + k), 1 - min 1 (m + k), 1 - min 1 (y + k))
 
 type FloatRGB  = (PDFFloat, PDFFloat, PDFFloat)
 type FloatCMYK = (PDFFloat, PDFFloat, PDFFloat, PDFFloat)

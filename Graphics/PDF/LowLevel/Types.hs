@@ -389,8 +389,12 @@ modifyStrict f = do
    s <- get
    put $! (f s)
 
--- | A monad where paths can be created
-class MonadWriter Builder m => MonadPath m
+-- | A monad where paths can be created, and where the graphics state can
+-- be set (colours, line width)
+class MonadWriter Builder m => MonadPath m where
+    -- | Record that the content has a CMYK colour.
+    -- See Note [Device colours] in Graphics.PDF.Draw
+    recordCmykColour :: m ()
 
 {-
 
