@@ -1,1 +1,0 @@
-The MAIN missing feature is the support for unicode and the bidirectionnal layout algorithm that will then be required.
