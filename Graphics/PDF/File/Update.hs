@@ -64,13 +64,19 @@ import Graphics.PDF.File.Write
 -- * the trailer of the new file, with /Prev (the previous section), /Size
 --   and the /Encrypt of the old file.
 --
--- The section is a cross-reference stream (with no filter) if the newest
--- section of the file is a stream: some readers do not accept a table
--- after a stream. Else it is a table.
+-- The section is a cross-reference stream if the newest section of the
+-- file is a stream: some readers do not accept a table after a stream.
+-- Else it is a table. With a stream, the objects of the update are in
+-- object streams, as in Note [Object streams of the writer] in
+-- Graphics.PDF.File.Write ('updateObjectStreams'). The object streams
+-- and the cross-reference stream get numbers after all the numbers of
+-- the file, also those of the references ('largestNumber'): a reference
+-- to no object stays a reference to no object. In an encrypted file, the
+-- object streams are encrypted, and the objects in them are not.
 --
 -- A new object gets a number after the numbers of the file
--- ('sourceSize'), and its references change, when its number is one of
--- the file:
+-- ('sourceSize') and of the references of the new file ('largestNumber'),
+-- and its references change, when its number is one of the file:
 --
 -- * an object that the reader removed (Note [Objects that the reader
 --   removes] in Graphics.PDF.File.Parse): an object stream is still in
@@ -124,11 +130,16 @@ data UpdateOptions = UpdateOptions
   , updateIgnoreCertification :: !Bool
     -- ^ Update a file that a DocMDP signature certifies with no changes.
     -- The certification is then not valid. False: 'Left'
+  , updateObjectStreams :: !Bool
+    -- ^ Put the objects of the update in object streams, when the newest
+    -- section of the file is a cross-reference stream. See Note
+    -- [Incremental update]
   } deriving (Eq, Show)
 
--- | The restrictions of the file are respected
+-- | The restrictions of the file are respected, and the objects of the
+-- update are in object streams when the file has a cross-reference stream
 defaultUpdateOptions :: UpdateOptions
-defaultUpdateOptions = UpdateOptions False False
+defaultUpdateOptions = UpdateOptions False False True
 
 -- | The bytes of a file with an incremental update: the bytes of the
 -- source, then the objects that the new file changes. The new file is
@@ -175,7 +186,7 @@ update opts src new0 = do
     then return (L.fromStrict (sourceBytes src)) else do
     -- a trailer /Info that is a dictionary becomes an object. See Note
     -- [Incremental update]
-    let info_n = maximum [sourceSize src, maybe 1 ((+ 1) . fst) (IM.lookupMax (pdfObjects new))]
+    let info_n = maximum [sourceSize src, largestNumber new + 1]
         (objects, new_trailer) = case M.lookup (C.pack "Info") (pdfTrailer new) of
           Just (Dict info) -> ( IM.insert info_n (0, Plain (Dict info)) (snd (IM.split 0 (pdfObjects new)))
                               , M.insert (C.pack "Info") (Ref info_n 0) (pdfTrailer new) )
@@ -192,21 +203,35 @@ update opts src new0 = do
                       (encrypt_value == Nothing)
     when (encrypt_value /= Nothing && first_id file_id /= first_id (dictLookup (C.pack "ID") (pdfTrailer old))) $
       throwError "an update cannot change the first string of the /ID of an encrypted file: it is a part of the key"
+    let size = maximum [sourceSize src, maybe 1 ((+ 1) . fst) (IM.lookupMax objects)]
+        -- the new objects get numbers after all the numbers of the file,
+        -- also those of the references. See Note [Incremental update]
+        first = max size (largestNumber new { pdfObjects = objects, pdfTrailer = new_trailer } + 1)
+        (kept, containers, in_streams) = packInObjectStreams first (IM.fromList changed)
+        packed = updateObjectStreams opts && sourceXrefStream src && not (IM.null in_streams)
+                 && first + IM.size containers <= 8388607
+        -- the objects of the update, and the number of a cross-reference
+        -- stream
+        (unencrypted, places, number)
+          | packed = (IM.toList (IM.union kept containers), in_streams, first + IM.size containers)
+          | sourceXrefStream src = (changed, IM.empty, first)
+          | otherwise = (changed, IM.empty, size)
+    -- the objects in an object stream are not encrypted: the object
+    -- stream is. See Note [Objects that are not encrypted] in
+    -- Graphics.PDF.File.Crypt
     written <- case sourceEncryption src of
-      Nothing -> return changed
+      Nothing -> return unencrypted
       Just (dec, _) -> mapM (\(n, (g, o)) -> do
                                r <- lift (encryptObject (randomBytes 16) dec n g o)
-                               either throwError (\o' -> return (n, (g, o'))) r) changed
-    let size = maximum [sourceSize src, maybe 1 ((+ 1) . fst) (IM.lookupMax objects)]
-        trailer = M.unions
+                               either throwError (\o' -> return (n, (g, o'))) r) unencrypted
+    let trailer = M.unions
           [ M.fromList ([ (C.pack "Prev", Integer (sourceStartXref src)) ]
                         ++ [ (C.pack "Encrypt", e) | Just e <- [encrypt_value] ]
                         ++ [ (C.pack "ID", i) | Just i <- [file_id] ])
-          , foldr (M.delete . C.pack) new_trailer ("ID" : section_keys) ]
-    return (render src size trailer written deleted)
+          , foldr M.delete new_trailer (C.pack "ID" : sectionKeys) ]
+    return (render src number trailer written places deleted)
   where
     -- the keys of a cross-reference section: the update writes its own
-    section_keys = ["Size", "Prev", "XRefStm", "Type", "W", "Index", "Length", "Filter", "DecodeParms", "DL"]
     first_id v = case v of
       Just (Array (x : _)) -> Just x
       _ -> Nothing
@@ -252,8 +277,8 @@ certified_with_no_changes file = docmdp || locked
 
 -- | The bytes of the source and of the update.
 -- See Note [Incremental update]
-render :: PdfSource -> Int -> Dict -> [(Int, (Int, Object))] -> [(Int, Int)] -> L.ByteString
-render src size trailer written deleted = L.fromStrict bytes <> separator <> renderObjects start written section
+render :: PdfSource -> Int -> Dict -> [(Int, (Int, Object))] -> IM.IntMap (Int, Int) -> [(Int, Int)] -> L.ByteString
+render src size trailer written in_streams deleted = L.fromStrict bytes <> separator <> renderObjects start written section
   where
     bytes = sourceBytes src
     -- "%%EOF" can be the last bytes of the file
@@ -263,7 +288,8 @@ render src size trailer written deleted = L.fromStrict bytes <> separator <> ren
     -- the free entries make a list from the entry 0 (PDF 32000-1, 7.5.4)
     -- each free entry gives the next one, and the last one gives 0
     free = zipWith (\(n, g) next -> (n, FreeEntry next g)) ((0, 65535) : deleted) (map fst deleted ++ [0])
-    entries offsets = IM.fromList (free ++ [ (n, InUse (off - base) g) | ((n, (g, _)), off) <- zip written offsets ])
+    entries offsets = IM.fromList (free ++ [ (n, InUse (off - base) g) | ((n, (g, _)), off) <- zip written offsets ]
+                                        ++ [ (n, InStream c i) | (n, (c, i)) <- IM.toList in_streams ])
     size_entry s = M.insert (C.pack "Size") (Integer (fromIntegral s))
     section offsets at
       | sourceXrefStream src =
@@ -310,7 +336,7 @@ renumber src file
     -- a number of the file: in use (an object that the reader removed) or
     -- free. See Note [Incremental update]
     clashes = [ n | n <- IM.keys (pdfObjects file), n > 0, IM.notMember n old, n < sourceSize src ]
-    first_free = maximum [sourceSize src, maybe 1 ((+ 1) . fst) (IM.lookupMax (pdfObjects file))]
+    first_free = maximum [sourceSize src, largestNumber file + 1]
     table = IM.fromList (zip clashes [first_free ..])
     rename n = IM.findWithDefault n n table
     on_object o = case o of

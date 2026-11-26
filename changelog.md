@@ -193,6 +193,26 @@
      the limits of the reader apply to it. `limitRepair` (True by
      default) can stop it, and `sourceRepaired` tells it. An incremental
      update of a repaired file is not possible.
+   * Object streams and cross-reference streams (PDF 1.5): the objects
+     that are not streams are compressed together in object streams, and
+     a compressed cross-reference stream gives their places. A document
+     is smaller: 43% of the bytes for 2,000 pages of text, 76% for the PDF
+     files of a Linux system. The builder writes them by default
+     (`objectStreams` of `PDFDocumentInfo`, only with `compressed`): the
+     bytes of each document change, and its /Info is an object.
+     `Graphics.PDF.File.renderPdfFile` writes them too (`RenderOptions`,
+     `renderPdfFileWith`, `writePdfFileWith`). `encryptPdf` and
+     `renderEncryptedPdfFile` put the objects in object streams, then
+     encrypt the object streams (`encryptPdfWith` for a table). The
+     signature dictionaries stay outside of the object streams: a
+     document is still signed after its rendering. A PDF/A-1 file keeps a
+     cross-reference table. An incremental update of a file with a
+     cross-reference stream puts its objects in object streams too
+     (`updateObjectStreams` of `UpdateOptions`).
+   * Breaking change: `PDFDocumentInfo` has a new field, `objectStreams`.
+     Code that makes a `PDFDocumentInfo` with its constructor, and not
+     from `standardDocInfo`, must give it (a record with no value for it
+     compiles with a warning, and fails when the document is rendered).
 
 ## 1.8
 

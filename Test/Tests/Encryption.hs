@@ -8,7 +8,7 @@ import Tests.Common
 import qualified Graphics.PDF.File as F
 import qualified Graphics.PDF as P
 import qualified Graphics.PDF.Archive as A
-import Graphics.PDF.Encryption (encryptPdf)
+import Graphics.PDF.Encryption (encryptPdf, encryptPdfWith)
 import Graphics.PDF.Signature (addSignature, signPdf, signature, Signature(..))
 import Control.Exception (evaluate)
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -79,12 +79,17 @@ test_encryptedDocuments = do
               page <- P.addPage Nothing
               P.newSection (T.pack "section") Nothing Nothing $ P.drawWithPage page (P.drawXObject img))
         ]
-  forM_ documents $ \(name, info, doc) -> do
+      layouts = [F.defaultRenderOptions, F.defaultRenderOptions { F.renderObjectStreams = False }]
+  forM_ [ (d, o) | d <- documents, o <- layouts ] $ \((name, info, doc), options) -> do
     let bytes = P.renderPdf info rect doc
         Right original = F.parsePdfFile (BL.toStrict bytes)
         restricted = (F.encryption (T.pack "user") (T.pack "owner")) { F.encPermissions = F.noPermissions { F.permPrint = True } }
-    Right encrypted <- encryptPdf restricted bytes
+        objstm = F.renderObjectStreams options
+    Right encrypted <- encryptPdfWith options restricted bytes
     let raw = BL.toStrict encrypted
+    -- the objects are in object streams, which are encrypted
+    assertEqual objstm ("/Type /ObjStm" `BS.isInfixOf` raw)
+    assertEqual objstm ("/Type /XRef" `BS.isInfixOf` raw)
     -- the text, the author and the embedded file are not in the bytes
     assertBool ((name == "text") `implies` (hello `BS.isInfixOf` BL.toStrict bytes))
     assertBool (not (hello `BS.isInfixOf` raw))
@@ -114,10 +119,12 @@ test_encryptedDocuments = do
     replace_in "/P -3900" "/P -3904" raw >>= left_with "/Perms" . with_password "user"
     -- an encrypted string must have a length that is a multiple of 16:
     -- here one byte less, and two spaces (the offsets do not change)
-    -- (the end of /Author in the /Info object)
+    -- (the end of /Author in the /Info object, which is not in an object
+    -- stream with a cross-reference table)
     case occurrences "> /Producer <" raw of
-      [at] -> left_with "encrypted data of the object"
+      [at] | not objstm -> left_with "encrypted data of the object"
                 (with_password "user" (BS.concat [BS.take (at - 2) raw, ">  ", BS.drop (at + 1) raw]))
+      [] | objstm -> return ()
       _ -> assertFailure "no /Author before /Producer"
   where
     implies a b = not a || b

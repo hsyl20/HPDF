@@ -61,7 +61,7 @@ import Data.Complex (Complex((:+)))
 
 -- | No information for the document  
 standardDocInfo :: PDFDocumentInfo          
-standardDocInfo = PDFDocumentInfo T.empty T.empty UseNone SinglePage standardViewerPrefs True
+standardDocInfo = PDFDocumentInfo T.empty T.empty UseNone SinglePage standardViewerPrefs True True
 
 -- | Create a PDF XObject
 createPDFXForm :: Monad m => PDFFloat -- ^ Left

@@ -19,7 +19,8 @@
 -- file that is not encrypted. 'encryptPdfFile' encrypts a file with
 -- AES-256. The reader repairs a file whose cross-reference is not
 -- correct, with a scan of the file ('limitRepair'). The writer gives
--- a file with one cross-reference table. A file is the objects of the
+-- a file with object streams and one cross-reference stream, or with one
+-- cross-reference table ('RenderOptions'). A file is the objects of the
 -- document, as values ('PdfFile'): the structure of the file (object
 -- streams, cross-reference streams, linearization) is not kept.
 --
@@ -52,6 +53,10 @@ module Graphics.PDF.File
   , defaultLimits
   , renderPdfFile
   , writePdfFile
+  , renderPdfFileWith
+  , writePdfFileWith
+  , RenderOptions(..)
+  , defaultRenderOptions
     -- * Incremental updates
   , PdfSource
   , sourceFile
@@ -70,6 +75,7 @@ module Graphics.PDF.File
   , permissionsFromValue
     -- * Encryption
   , encryptPdfFile
+  , renderEncryptedPdfFile
   , Encryption(..)
   , encryption
     -- * Objects
@@ -123,6 +129,10 @@ read_with parse path = do
     Left e -> Left (show (e :: IOException))
     Right bytes -> parse bytes
 
--- | Write a PDF file
+-- | Write a PDF file, with 'defaultRenderOptions'
 writePdfFile :: FilePath -> PdfFile -> IO ()
 writePdfFile path = L.writeFile path . renderPdfFile
+
+-- | Write a PDF file, with the options of the writer
+writePdfFileWith :: RenderOptions -> FilePath -> PdfFile -> IO ()
+writePdfFileWith options path = L.writeFile path . renderPdfFileWith options

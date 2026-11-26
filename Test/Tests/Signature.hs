@@ -14,6 +14,7 @@ import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as M
 import Data.IORef
+import Control.Monad (forM_)
 import qualified Graphics.PDF.File as F
 
 tests :: TestTree
@@ -86,8 +87,9 @@ test_rewrittenSignature = do
         addSignature page signature {sigName = T.pack "A. Signer", sigSize = 64}
   case F.parsePdfFile (BL.toStrict unsigned) of
     Left e -> assertFailure e
-    Right file -> do
-      let rewritten = F.renderPdfFile file
+    Right file -> forM_ [F.defaultRenderOptions, F.defaultRenderOptions { F.renderObjectStreams = False }] $ \options -> do
+      let rewritten = F.renderPdfFileWith options file
+          Right file_rewritten = F.parsePdfFile (BL.toStrict rewritten)
       ref <- newIORef BL.empty
       r <- signPdf (\bytes -> writeIORef ref bytes >> return (BS.pack [0xDE, 0xAD])) rewritten
       case r of
@@ -104,7 +106,11 @@ test_rewrittenSignature = do
               let contents f = [ s | (_, F.Plain (F.Dict d)) <- IM.elems (F.pdfObjects f)
                                    , Just (F.String s) <- [M.lookup "Contents" d] ]
               assertEqual [BS.pack (0xDE : 0xAD : replicate 62 0)] (contents file')
-              assertEqual (IM.keys (F.pdfObjects file)) (IM.keys (F.pdfObjects file'))
+              -- the same objects as the file before the signature, except /Contents
+              let without_signature (g, F.Plain (F.Dict d)) | F.isSignatureDict d =
+                    (g, F.Plain (F.Dict (M.insert "Contents" (F.String (BS.replicate 64 0)) d)))
+                  without_signature o = o
+              assertEqual (F.pdfObjects file_rewritten) (IM.map without_signature (F.pdfObjects file'))
 
 
 -- A signature field reserves the space of the signature, and 'signPdf'

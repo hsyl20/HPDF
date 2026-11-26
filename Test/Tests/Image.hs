@@ -93,7 +93,7 @@ imageStreams pdf = go pdf
 
 -- A document with one PNG image
 pngDocument :: PngFile -> BS.ByteString
-pngDocument png = BL.toStrict $ renderPdf standardDocInfo (PDFRect 0 0 100 100) $ do
+pngDocument png = BL.toStrict $ renderPdf standardDocInfo {objectStreams = False} (PDFRect 0 0 100 100) $ do
   image <- createPDFPng png
   page <- addPage Nothing
   drawWithPage page (drawXObject image)
