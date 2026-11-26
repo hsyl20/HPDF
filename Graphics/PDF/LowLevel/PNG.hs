@@ -12,17 +12,17 @@ module Graphics.PDF.LowLevel.PNG
   ) where
 
 import qualified Codec.Compression.Zlib as Z
-import qualified Codec.Compression.Zlib.Internal as ZI
 import Control.Monad (forM_)
 import Data.Bits (shiftL, shiftR, (.&.))
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Internal as SI
 import qualified Data.ByteString.Lazy as L
+import Graphics.PDF.LowLevel.Inflate (checkLineFilters, inflateExactly, unfilterLines)
 import qualified Data.ByteString.Unsafe as SU
 import Data.Word (Word8)
 import Foreign.Ptr (Ptr)
-import Foreign.Storable (peekByteOff, pokeByteOff)
+import Foreign.Storable (pokeByteOff)
 
 -- Note [PNG images]
 -- ~~~~~~~~~~~~~~~~~
@@ -160,62 +160,13 @@ row_bytes h w = (w * channels h * hDepth h + 7) `div` 8
 filter_unit :: Header -> Int
 filter_unit h = max 1 (channels h * hDepth h `div` 8)
 
--- | Expand a zlib stream that must give exactly this number of bytes.
--- The expansion stops when the stream gives more.
+-- | Expand the image data, which must give exactly this number of bytes
 inflate :: Int -> L.ByteString -> Either String S.ByteString
-inflate expected input = do
-    chunks <- ZI.foldDecompressStreamWithInput
-                (\chunk next size ->
-                   let size' = size + S.length chunk
-                   in if size' > expected then Left "PNG: the image has more data than its header gives"
-                      else (chunk :) <$> next size')
-                (\_ size -> if size == expected then Right [] else Left "PNG: the image has less data than its header gives")
-                (\e _ -> Left ("PNG: the data cannot be expanded: " ++ show e))
-                (ZI.decompressST ZI.zlibFormat ZI.defaultDecompressParams)
-                input
-                0
-    Right (S.concat chunks)
+inflate = inflateExactly "PNG"
 
 -- | The filter byte of each line is 0 to 4
 check_filters :: Int -> Int -> S.ByteString -> Either String ()
-check_filters rb lines_ raw =
-    check (all (\y -> SU.unsafeIndex raw (y * (rb + 1)) <= 4) [0 .. lines_ - 1]) "unknown filter of a line"
-
--- | Remove the filter of each line. The input has, for each line, the
--- byte of the filter and then the bytes of the line. Its length and its
--- filter bytes are checked before.
-unfilter :: Int -- ^ Bytes of a pixel for the filters
-         -> Int -- ^ Bytes of a line
-         -> Int -- ^ Number of lines
-         -> S.ByteString
-         -> S.ByteString
-unfilter unit rb lines_ raw = SI.unsafeCreate (rb * lines_) $ \out ->
-    forM_ [0 .. lines_ - 1] $ \y -> do
-      let src = y * (rb + 1)
-          dst = y * rb
-          ftype = SU.unsafeIndex raw src
-          get :: Int -> IO Int
-          get i = (fromIntegral :: Word8 -> Int) <$> peekByteOff out i
-          left x = if x >= unit then get (dst + x - unit) else return 0
-          up x = if y > 0 then get (dst - rb + x) else return 0
-          upleft x = if y > 0 && x >= unit then get (dst - rb + x - unit) else return 0
-      forM_ [0 .. rb - 1] $ \x -> do
-        let v = fromIntegral (SU.unsafeIndex raw (src + 1 + x)) :: Int
-        r <- case ftype of
-          0 -> return v
-          1 -> (v +) <$> left x
-          2 -> (v +) <$> up x
-          3 -> do { a <- left x; b <- up x; return (v + (a + b) `div` 2) }
-          _ -> do { a <- left x; b <- up x; c <- upleft x; return (v + paeth a b c) }
-        pokeByteOff out (dst + x) (fromIntegral r :: Word8)
-  where
-    paeth :: Int -> Int -> Int -> Int
-    paeth a b c =
-      let p = a + b - c
-          pa = abs (p - a)
-          pb = abs (p - b)
-          pc = abs (p - c)
-      in if pa <= pb && pa <= pc then a else if pb <= pc then b else c
+check_filters rb lines_ raw = check (checkLineFilters rb lines_ raw) "unknown filter of a line"
 
 -- | The seven passes of an interlaced image: first column, first line,
 -- step of the columns, step of the lines
@@ -244,7 +195,7 @@ deinterlace h raw = SI.unsafeCreate (hWidth h * hHeight h * pixel) $ \out ->
     go out offset (((x0, y0, dx, dy), pw, ph) : rest) = do
       let rb = row_bytes h pw
           size = ph * (rb + 1)
-          lines_ = unfilter (filter_unit h) rb ph (S.take size (S.drop offset raw))
+          lines_ = unfilterLines (filter_unit h) rb ph (S.take size (S.drop offset raw))
       forM_ [0 .. ph - 1] $ \j ->
         forM_ [0 .. pw - 1] $ \i -> do
           let src = (j * pw + i) * pixel
@@ -335,7 +286,7 @@ parsePngImage file = do
         raw <- inflate (hHeight h * (rb + 1)) idat
         check_filters rb (hHeight h) raw
         if has_alpha || palette_alphas /= Nothing
-          then Right (split h image palette_alphas has_alpha (unfilter (filter_unit h) rb (hHeight h) raw))
+          then Right (split h image palette_alphas has_alpha (unfilterLines (filter_unit h) rb (hHeight h) raw))
           else Right image
   where
     sample_mask h = (1 `shiftL` hDepth h) - 1
