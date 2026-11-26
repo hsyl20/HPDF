@@ -137,6 +137,7 @@ defaultUpdateOptions = UpdateOptions False False
 --
 -- 'Left' for:
 --
+-- * a source that the reader repaired ('sourceRepaired');
 -- * a new file with no /Root, or with an /Encrypt (an update cannot
 --   encrypt a file: see 'Graphics.PDF.File.encryptPdfFile');
 -- * a lower version, or a higher version with no catalog;
@@ -159,6 +160,9 @@ update :: UpdateOptions -> PdfSource -> PdfFile -> ExceptT String (State ChaChaD
 update opts src new0 = do
   let old = sourceFile src
       encrypt_value = snd <$> sourceEncryption src
+  -- See Note [Repair of a file] in Graphics.PDF.File.Parse
+  when (sourceRepaired src) $
+    throwError "the cross-reference of the file is not correct (the reader repaired it): write the file again (renderPdfFile), then update it"
   when (M.member (C.pack "Encrypt") (pdfTrailer new0)) $
     throwError "an update cannot encrypt a file: the trailer has an /Encrypt"
   case dictLookup (C.pack "Root") (pdfTrailer new0) of

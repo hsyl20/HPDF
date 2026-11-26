@@ -19,6 +19,11 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as M
 import Data.Either (isLeft)
 
+-- | The reader with no repair: these tests are for the cross-reference
+-- sections. See Note [Repair of a file] in Graphics.PDF.File.Parse
+strict_parse :: BS.ByteString -> Either String F.PdfFile
+strict_parse = F.parsePdfFileWith F.defaultLimits { F.limitRepair = False }
+
 tests :: TestTree
 tests = testGroup "PdfFile"
   [ test "numbers" test_numbers
@@ -375,8 +380,8 @@ test_badCrossReferences = do
       -- the /Prev of the update is the update itself
       loop = let u = withUpdate base [] [] in replaceOnce (C.pack ("/Prev " ++ show start)) (C.pack ("/Prev " ++ show (previousStart u))) u
       prev_out = replaceOnce (C.pack ("/Prev " ++ show start)) "/Prev 99999999" (withUpdate base [] [])
-      expectLeft name bytes = assertBoolVerbose name (isLeft (F.parsePdfFile bytes))
-  assertBool (either (("loop" `elem`) . words) (const False) (F.parsePdfFile loop))
+      expectLeft name bytes = assertBoolVerbose name (isLeft (strict_parse bytes))
+  assertBool (either (("loop" `elem`) . words) (const False) (strict_parse loop))
   expectLeft "prev out of the file" prev_out
   expectLeft "no startxref" (replaceOnce "startxref" "startxrfe" base)
   expectLeft "startxref out of the file" (replaceOnce (C.pack ("startxref\n" ++ show start)) "startxref\n999999" base)
@@ -414,12 +419,12 @@ test_crossReferenceStreams = do
       at = BS.length plain - BS.length before - BS.length after + BS.length before + 7
       bad_predictor = BS.concat [BS.take at plain, BS.singleton 7, BS.drop (at + 1) plain]
   assertEqual (Just 0) (BS.indexMaybe plain at)
-  assertBool (isLeft (F.parsePdfFile bad_predictor))
+  assertBool (isLeft (strict_parse bad_predictor))
   -- a width that is not possible, an /Index larger than the data, a
   -- predictor with the wrong columns
-  assertBool (isLeft (F.parsePdfFile (replaceOnce "/W [1 2 1]" "/W [1 2 9]" (xrefStreamFile defaultX))))
-  assertBool (isLeft (F.parsePdfFile (replaceOnce "/Size 7" "/Size 70" (xrefStreamFile defaultX))))
-  assertBool (isLeft (F.parsePdfFile (replaceOnce "/Columns 4" "/Columns 5" (xrefStreamFile defaultX))))
+  assertBool (isLeft (strict_parse (replaceOnce "/W [1 2 1]" "/W [1 2 9]" (xrefStreamFile defaultX))))
+  assertBool (isLeft (strict_parse (replaceOnce "/Size 7" "/Size 70" (xrefStreamFile defaultX))))
+  assertBool (isLeft (strict_parse (replaceOnce "/Columns 4" "/Columns 5" (xrefStreamFile defaultX))))
 
 -- Note [Hybrid files] in Graphics.PDF.File.Parse
 test_hybridFile :: IO ()
@@ -456,7 +461,7 @@ test_limitsOfTheFile :: IO ()
 test_limitsOfTheFile = do
   let (hybrid, xrefstm) = hybridFile
       updated = withEmptyUpdates 300 xrefstm hybrid
-      parse limits = F.parsePdfFileWith limits updated
+      parse limits = F.parsePdfFileWith limits { F.limitRepair = False } updated
       ok = either (const False) (const True)
   -- 300 sections give the same cross-reference stream: it is decoded one
   -- time (5 bytes), and not 300 times
@@ -466,9 +471,9 @@ test_limitsOfTheFile = do
   assertBool (isLeft (parse F.defaultLimits { F.limitObjects = 100 }))
   -- the rows of a cross-reference stream are entries: the check comes
   -- before the entries are made
-  assertBool (isLeft (F.parsePdfFileWith F.defaultLimits { F.limitObjects = 3 } (xrefStreamFile defaultX)))
-  assertBool (isLeft (F.parsePdfFileWith F.defaultLimits { F.limitObjects = 3 } (classicFile " \n" documentObjects "")))
-  assertBool (ok (F.parsePdfFileWith F.defaultLimits { F.limitObjects = 10 } (classicFile " \n" documentObjects "")))
+  assertBool (isLeft (F.parsePdfFileWith F.defaultLimits { F.limitRepair = False, F.limitObjects = 3 } (xrefStreamFile defaultX)))
+  assertBool (isLeft (F.parsePdfFileWith F.defaultLimits { F.limitRepair = False, F.limitObjects = 3 } (classicFile " \n" documentObjects "")))
+  assertBool (ok (F.parsePdfFileWith F.defaultLimits { F.limitRepair = False, F.limitObjects = 10 } (classicFile " \n" documentObjects "")))
 
 -- Names and strings are decoded in linear time and memory.
 -- See Note [Linear decoding of names and strings] in Graphics.PDF.File.Lexer
@@ -510,12 +515,12 @@ test_objectStreamOffsets = do
       second = C.pack (show (BS.length pages + 1))
   roundTrip (file ("2 0 3 " <> second <> "\n")) >>= expectedDocument
   -- two objects at the same offset, and offsets that do not increase
-  assertBool (isLeft (F.parsePdfFile (file "2 0 3 0\n")))
-  assertBool (isLeft (F.parsePdfFile (file ("2 " <> second <> " 3 0\n"))))
+  assertBool (isLeft (strict_parse (file "2 0 3 0\n")))
+  assertBool (isLeft (strict_parse (file ("2 " <> second <> " 3 0\n"))))
   -- the first object cannot read the second one: it ends at the next
   -- offset. Here the object 2 is "[1 " and not [1 2 3]
-  assertBool (isLeft (F.parsePdfFile (file_with "2 0 3 3\n" "[1 2 3] 4")))
-  assertBool (either (const False) (const True) (F.parsePdfFile (file_with "2 0 3 8\n" "[1 2 3] 4")))
+  assertBool (isLeft (strict_parse (file_with "2 0 3 3\n" "[1 2 3] 4")))
+  assertBool (either (const False) (const True) (strict_parse (file_with "2 0 3 8\n" "[1 2 3] 4")))
 
 -- Files that some writers make, and that the reader reads.
 test_unusualFiles :: IO ()
@@ -604,9 +609,9 @@ test_objectStreamErrors = do
       with_stream _ = let h = "2 0 3 " <> C.pack (show (BS.length pages + 1)) <> "\n"
                       in plain_objstm 2 (BS.length h) (h <> pages <> "\n<< /Length 1 >>\nstream\nx\nendstream")
       not_objstm page = replaceOnce "/Type /ObjStm" "/Type /XObject" (two page)
-  mapM_ (\(name, f) -> assertBoolVerbose name (isLeft (F.parsePdfFile (withObjStm f))))
+  mapM_ (\(name, f) -> assertBoolVerbose name (isLeft (strict_parse (withObjStm f))))
     [("wrong number", wrong_number), ("huge N", huge_n), ("stream in an object stream", with_stream), ("not an object stream", not_objstm)]
-  assertBool (isRight' (F.parsePdfFile good))
+  assertBool (isRight' (strict_parse good))
   where
     isRight' = either (const False) (const True)
 
@@ -614,7 +619,7 @@ test_objectStreamErrors = do
 test_streamLengths :: IO ()
 test_streamLengths = do
   let withContent body extra = classicFile " \n" (take 3 documentObjects ++ [(4, 0, body)] ++ extra) ""
-      content p = case F.parsePdfFile p of
+      content p = case strict_parse p of
         Right f -> case F.getObject f 4 of
           Just (F.Stream _ d) -> Right d
           other -> Left (show other)
@@ -657,11 +662,11 @@ test_streamLengths = do
 test_refusedFiles :: IO ()
 test_refusedFiles = do
   let encrypted = classicFile " \n" documentObjects "/Encrypt << /Filter /Standard >>"
-  case F.parsePdfFile encrypted of
+  case strict_parse encrypted of
     Left e -> assertBoolVerbose e ("encryption" `elem` words e)
     Right _ -> assertFailure "an encrypted file was read"
   let file = xrefStreamFile defaultX
-      parse limits = F.parsePdfFileWith limits file
+      parse limits = F.parsePdfFileWith limits { F.limitRepair = False } file
   assertBool (either (const False) (const True) (parse F.defaultLimits))
   assertBool (isLeft (parse F.defaultLimits { F.limitTotal = 10 }))
   assertBool (isLeft (parse F.defaultLimits { F.limitStream = 10 }))
@@ -670,8 +675,8 @@ test_refusedFiles = do
   let bomb = xrefStreamFile defaultX { xPadding = 10000000 }
   assertBool (BS.length bomb < 20000)
   assertBool (either (const False) (const True) (F.parsePdfFileWith F.defaultLimits bomb))
-  assertBool (isLeft (F.parsePdfFileWith F.defaultLimits { F.limitStream = 1000000 } bomb))
-  assertBool (isLeft (F.parsePdfFileWith F.defaultLimits { F.limitTotal = 1000000 } bomb))
+  assertBool (isLeft (F.parsePdfFileWith F.defaultLimits { F.limitRepair = False, F.limitStream = 1000000 } bomb))
+  assertBool (isLeft (F.parsePdfFileWith F.defaultLimits { F.limitRepair = False, F.limitTotal = 1000000 } bomb))
 
 -- A file that is not correct gives Left, and never an exception.
 -- See Note [Limits of the reader] in Graphics.PDF.File.Parse
@@ -739,7 +744,7 @@ test_knownAttacks = do
   let classic = classicFile " \n" documentObjects ""
       stream_file = xrefStreamFile defaultX
       -- the reason of the refusal has these words
-      refusedFor words_ name bytes = case F.parsePdfFile bytes of
+      refusedFor words_ name bytes = case strict_parse bytes of
         Left e -> assertBoolVerbose (name ++ ": " ++ e) (all (`elem` words e) words_)
         Right _ -> assertFailure (name ++ ": the file was read")
   -- CVE-2018-7174 (xpdf), CVE-2026-27628 (pypdf): a /Prev loop. The
@@ -786,7 +791,7 @@ test_knownAttacks = do
   refusedFor ["integer"] "a comment after startxref" (fst (BS.breakSubstring "startxref" classic) <> "startxref % no end")
   -- CVE-2018-20481 (poppler): a reference to an object that is not in the
   -- cross-reference
-  case F.parsePdfFile (replaceOnce "/Root 1 0 R" "/Root 99 0 R" classic) of
+  case strict_parse (replaceOnce "/Root 1 0 R" "/Root 99 0 R" classic) of
     Left e -> assertFailure e
     Right f -> do
       assertEqual Nothing (F.getObject f 99)

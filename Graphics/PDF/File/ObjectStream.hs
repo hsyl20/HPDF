@@ -6,6 +6,7 @@
 ---------------------------------------------------------
 module Graphics.PDF.File.ObjectStream
   ( objectStreamObjects
+  , objectStreamNumbers
   ) where
 
 import Control.Monad (forM, unless, when)
@@ -53,6 +54,37 @@ objectStreamObjects :: Int -- ^ Largest size of the decoded data
                     -> [(Int, Int)] -- ^ The objects: number, and index in the stream
                     -> Either String (IM.IntMap (Int, Object), Int)
 objectStreamObjects limit depth container object wanted = do
+  (decoded, table) <- stream_table limit container object
+  objects <- forM wanted $ \(number, index) -> do
+    (number', start, end) <- maybe (Left ("the object stream " ++ show container ++ " has no index " ++ show index)) Right
+                                   (IM.lookup index table)
+    when (number' /= fromIntegral number) $
+      Left ("the object stream " ++ show container ++ " does not have the object " ++ show number ++ " at its index")
+    let slice = S.take end decoded
+    (v, after) <- runParser (valueWith depth) slice start
+    (is_stream, _) <- runParser (optionalKeyword "stream") slice after
+    when is_stream $ Left ("the object stream " ++ show container ++ " has a stream")
+    Right (number, (0, Plain v))
+  Right (IM.fromList objects, S.length decoded)
+
+-- | The numbers of the objects of an object stream, in the order of their
+-- indexes, and the size of the decoded data. A number that is not an
+-- object number is not given.
+-- See Note [Objects of an object stream]
+objectStreamNumbers :: Int -- ^ Largest size of the decoded data
+                    -> Int -- ^ Number of the object stream
+                    -> Object -- ^ The object stream
+                    -> Either String ([(Int, Int)], Int) -- ^ The number and the index of each object
+objectStreamNumbers limit container object = do
+  (decoded, table) <- stream_table limit container object
+  Right ( [ (fromInteger n, i) | (i, (n, _, _)) <- IM.toList table, n >= 1, n < 2 ^ (31 :: Int) ]
+        , S.length decoded )
+
+-- | The decoded data of an object stream, and for each index: the number
+-- of the object, and its start and its end in the data.
+-- See Note [Objects of an object stream]
+stream_table :: Int -> Int -> Object -> Either String (S.ByteString, IM.IntMap (Integer, Int, Int))
+stream_table limit container object = do
   (dict, raw) <- case object of
     Stream d r | dictLookup (C.pack "Type") d == Just (Name (C.pack "ObjStm")) -> Right (d, r)
     _ -> Left ("the object " ++ show container ++ " is not an object stream")
@@ -70,15 +102,4 @@ objectStreamObjects limit depth container object wanted = do
     Left ("the offsets of the object stream " ++ show container ++ " do not increase")
   -- each object: its number, its start and its end in the decoded data
   let ends = map (\o -> first + fromInteger o) (drop 1 offsets) ++ [S.length decoded]
-      table = IM.fromList (zip [0 ..] (zip3 (map fst pairs) (map (\o -> first + fromInteger o) offsets) ends))
-  objects <- forM wanted $ \(number, index) -> do
-    (number', start, end) <- maybe (Left ("the object stream " ++ show container ++ " has no index " ++ show index)) Right
-                                   (IM.lookup index table)
-    when (number' /= fromIntegral number) $
-      Left ("the object stream " ++ show container ++ " does not have the object " ++ show number ++ " at its index")
-    let slice = S.take end decoded
-    (v, after) <- runParser (valueWith depth) slice start
-    (is_stream, _) <- runParser (optionalKeyword "stream") slice after
-    when is_stream $ Left ("the object stream " ++ show container ++ " has a stream")
-    Right (number, (0, Plain v))
-  Right (IM.fromList objects, S.length decoded)
+  Right (decoded, IM.fromList (zip [0 ..] (zip3 (map fst pairs) (map (\o -> first + fromInteger o) offsets) ends)))
