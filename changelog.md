@@ -161,6 +161,15 @@
      user password is empty. `pdfPermissions` has the permissions of a file
      that the user password opened (`Permissions`); the reader does not
      apply them, and a file written again is not encrypted.
+   * Encryption, `Graphics.PDF.Encryption`: `encryptPdf` encrypts a
+     rendered document with a user password and an owner password
+     (AES-256, /R 6 of PDF 2.0), and the permissions of the document
+     (`Permissions`). `Graphics.PDF.File.encryptPdfFile` encrypts a
+     `PdfFile`. A document can be encrypted, then signed. A PDF/A document
+     cannot be encrypted. A file whose permissions are restricted
+     (`pdfPermissions`) is not encrypted again, unless
+     `encIgnoreSourcePermissions` is True. `HPDF-Sign-Demo` also writes an
+     encrypted and signed document.
 
 ## 1.8
 

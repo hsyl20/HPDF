@@ -80,7 +80,7 @@ jobs:
       run: cabal run HPDF-demo
 
     # openssl makes a key and a certificate; pdfsig (poppler) verifies the
-    # signature of the document.
+    # signature of the document, and of the document encrypted then signed.
     - name: Sign a document and verify the signature
       run: |
         sudo apt-get install -y poppler-utils
@@ -90,6 +90,10 @@ jobs:
         pdfsig signed.pdf | tee pdfsig.txt
         grep -q 'Signature Validation: Signature is Valid' pdfsig.txt
         grep -q 'Total document signed' pdfsig.txt
+        pdfsig -upw user encrypted-signed.pdf | tee pdfsig-encrypted.txt
+        grep -q 'Signature Validation: Signature is Valid' pdfsig-encrypted.txt
+        grep -q 'Total document signed' pdfsig-encrypted.txt
+        pdfinfo -upw user encrypted-signed.pdf | grep -q 'algorithm:AES-256'
 
     # veraPDF is the reference validator for PDF/A.
     - name: Validate the PDF/A demo with veraPDF

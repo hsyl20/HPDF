@@ -82,6 +82,34 @@ service), `signPdf` gives the bytes to sign to your function instead.
 A document has one signature, and the signature field is not visible. See
 `HPDF-Sign-Demo` (Test/sign.hs).
 
+## Encryption
+
+`Graphics.PDF.Encryption` encrypts a rendered document with a user
+password and an owner password (AES-256, PDF 2.0), with the permissions
+of the document:
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+import Graphics.PDF.Encryption
+
+main = do
+  -- printing (with all the quality), and nothing else
+  let printing = noPermissions { permPrint = True, permPrintHighQuality = True }
+      enc = (encryption "user" "owner") { encPermissions = printing }
+  encrypted <- encryptPdf enc (renderPdf standardDocInfo rect doc)
+  either fail (B.writeFile "encrypted.pdf") encrypted
+```
+
+A document with a signature field can be encrypted, then signed with
+`signPdfWith`. A PDF/A document cannot be encrypted, and the owner
+password must not be the user password.
+
+The permissions are for the readers: the user password decrypts all the
+document. `Graphics.PDF.File` gives the permissions of a file that it
+opened with the user password (`pdfPermissions`), and does not apply
+them; `encryptPdf` does not encrypt again a file with restricted
+permissions, unless `encIgnoreSourcePermissions` is True.
+
 ## Reading a PDF file
 
 `Graphics.PDF.File` reads an existing PDF file into values, and writes it
@@ -98,8 +126,10 @@ main = do
 ```
 
 The reader knows the cross-reference tables (with the updates of a file),
-the cross-reference streams and the object streams. It does not decrypt a
-file. `HPDF-Rewrite-Demo` (Test/rewrite.hs) reads a file and writes it again.
+the cross-reference streams and the object streams. It decrypts an
+encrypted file with its password (`F.readPdfFileWithPassword`): RC4,
+AES-128 and AES-256. `HPDF-Rewrite-Demo` (Test/rewrite.hs) reads a file
+and writes it again.
 
 ## Documentation
 
@@ -114,7 +144,7 @@ $ cabal run HPDF-demo
 $ open demo.pdf
 $ cabal run HPDF-Unicode-Demo  # writes unicode.pdf
 $ cabal run HPDF-PDFA-Demo     # writes pdfa.pdf
-$ cabal run HPDF-Sign-Demo -- key.pem certificates.pem  # writes signed.pdf
+$ cabal run HPDF-Sign-Demo -- key.pem certificates.pem  # writes signed.pdf and encrypted-signed.pdf
 ```
 
 The TrueType tests and the two demos look for DejaVu Sans or Noto Sans in

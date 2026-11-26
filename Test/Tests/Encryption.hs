@@ -6,7 +6,12 @@ module Tests.Encryption (tests) where
 import Test.Tasty (TestTree, localOption, mkTimeout, testGroup)
 import Tests.Common
 import qualified Graphics.PDF.File as F
+import qualified Graphics.PDF as P
+import qualified Graphics.PDF.Archive as A
+import Graphics.PDF.Encryption (encryptPdf)
+import Graphics.PDF.Signature (addSignature, signPdf, signature, Signature(..))
 import Control.Exception (evaluate)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Control.Monad (forM_, when)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C
@@ -30,7 +35,202 @@ tests = testGroup "Encryption"
   , test "emptyAesString" test_emptyAesString
   , test "badEncryption" test_badEncryption
   , localOption (mkTimeout 120000000) (test "malformedEncryptedFiles" test_malformedEncryptedFiles)
+  , localOption (mkTimeout 120000000) (test "malformedHpdfFiles" test_malformedHpdfFiles)
+  , test "permissionsValue" test_permissionsValue
+  , test "encryptedDocuments" test_encryptedDocuments
+  , test "encryptionRefusals" test_encryptionRefusals
+  , test "encryptionKeepsTheFile" test_encryptionKeepsTheFile
+  , test "encryptedThenSigned" test_encryptedThenSigned
   ]
+
+-- /P: the bits 3 to 6 and 9 to 12 are the permissions, the bits 1 and 2
+-- are 0, the other bits are 1
+test_permissionsValue :: IO ()
+test_permissionsValue = do
+  assertEqual (-4) (F.permissionsValue F.allPermissions)
+  assertEqual (-3904) (F.permissionsValue F.noPermissions)
+  let only f = F.permissionsValue (f F.noPermissions) + 3904
+  assertEqual 4 (only (\p -> p { F.permPrint = True }))
+  assertEqual 8 (only (\p -> p { F.permModify = True }))
+  assertEqual 16 (only (\p -> p { F.permCopy = True }))
+  assertEqual 32 (only (\p -> p { F.permAnnotate = True }))
+  assertEqual 256 (only (\p -> p { F.permFillForms = True }))
+  assertEqual 512 (only (\p -> p { F.permExtractForAccessibility = True }))
+  assertEqual 1024 (only (\p -> p { F.permAssemble = True }))
+  assertEqual 2048 (only (\p -> p { F.permPrintHighQuality = True }))
+
+-- HPDF documents, encrypted, then read with each password: the same
+-- objects, and the strings and the streams of the file are encrypted.
+-- See Note [Encryption of a file] in Graphics.PDF.File.Encrypt
+test_encryptedDocuments :: IO ()
+test_encryptedDocuments = do
+  Right helvetica <- P.mkStdFont P.Helvetica
+  let rect = P.PDFRect 0 0 300 200
+      hello = C.pack ("<" ++ hex "Hello" ++ "> Tj")
+      documents =
+        [ ("text", P.standardDocInfo { P.compressed = False, P.author = T.pack "An author" }, do
+              page <- P.addPage Nothing
+              P.drawWithPage page $ do
+                P.stroke (P.Rectangle (10 P.:+ 10) (100 P.:+ 100))
+                P.drawText (P.text (P.PDFFont helvetica 12) 10 150 (T.pack "Hello")))
+        , ("jpeg, outline and file", P.standardDocInfo, do
+              img <- P.createPDFJpeg jpg
+              _ <- A.embedAssociatedFile (A.associatedFile (T.pack "a.txt") "text/plain" (BL.fromStrict (C.pack "Hello")))
+              page <- P.addPage Nothing
+              P.newSection (T.pack "section") Nothing Nothing $ P.drawWithPage page (P.drawXObject img))
+        ]
+  forM_ documents $ \(name, info, doc) -> do
+    let bytes = P.renderPdf info rect doc
+        Right original = F.parsePdfFile (BL.toStrict bytes)
+        restricted = (F.encryption (T.pack "user") (T.pack "owner")) { F.encPermissions = F.noPermissions { F.permPrint = True } }
+    Right encrypted <- encryptPdf restricted bytes
+    let raw = BL.toStrict encrypted
+    -- the text, the author and the embedded file are not in the bytes
+    assertBool ((name == "text") `implies` (hello `BS.isInfixOf` BL.toStrict bytes))
+    assertBool (not (hello `BS.isInfixOf` raw))
+    assertBool (not (C.pack ("(" ++ "An author" ++ ")") `BS.isInfixOf` raw))
+    assertBool (not (C.pack "Hello" `BS.isInfixOf` raw))
+    assertBool ("/P -3900" `BS.isInfixOf` raw)
+    forM_ ["user", "owner"] $ \password -> case with_password password raw of
+      Left e -> assertFailure (name ++ ", " ++ password ++ ": " ++ e)
+      Right f -> do
+        assertEqual (1, 7) (F.pdfVersion f)
+        assertEqual (decoded_streams original) (decoded_streams f)
+        -- the same objects, except the catalog, which has /Extensions
+        let Just (F.Ref root _) = F.dictLookup "Root" (F.pdfTrailer original)
+            without_root = IM.delete root . F.pdfObjects
+        assertEqual (without_root original) (IM.filterWithKey (\k _ -> IM.member k (F.pdfObjects original)) (without_root f))
+        case (F.getObject original root, F.getObject f root) of
+          (Just (F.Plain (F.Dict c)), Just (F.Plain (F.Dict c'))) -> do
+            assertEqual c (M.delete "Extensions" c')
+            assertBool (M.member "Extensions" c')
+          _ -> assertFailure "no catalog"
+        -- the /Info dictionary of the trailer is now an object
+        let info_of file = F.resolveValue file <$> M.lookup "Info" (F.pdfTrailer file)
+        assertEqual (info_of original) (info_of f)
+        assertBool (case M.lookup "Info" (F.pdfTrailer f) of Just (F.Ref _ _) -> True; _ -> False)
+    left_with "password is not correct" (with_password "nobody" raw)
+    -- /Perms has the /P of the file
+    replace_in "/P -3900" "/P -3904" raw >>= left_with "/Perms" . with_password "user"
+    -- an encrypted string must have a length that is a multiple of 16:
+    -- here one byte less, and two spaces (the offsets do not change)
+    -- (the end of /Author in the /Info object)
+    case occurrences "> /Producer <" raw of
+      [at] -> left_with "encrypted data of the object"
+                (with_password "user" (BS.concat [BS.take (at - 2) raw, ">  ", BS.drop (at + 1) raw]))
+      _ -> assertFailure "no /Author before /Producer"
+  where
+    implies a b = not a || b
+
+-- The documents that are not encrypted
+test_encryptionRefusals :: IO ()
+test_encryptionRefusals = do
+  let rect = P.PDFRect 0 0 300 200
+      plain = P.renderPdf P.standardDocInfo rect (P.addPage Nothing >> return ())
+      enc = F.encryption (T.pack "user") (T.pack "owner")
+  r1 <- encryptPdf enc { F.encOwnerPassword = T.empty } plain
+  left_with "owner password cannot be empty" r1
+  r2 <- encryptPdf enc { F.encUserPassword = T.pack "caf\233" } plain
+  left_with "printable ASCII" r2
+  -- an empty user password: all can open the document
+  Right open <- encryptPdf enc { F.encUserPassword = T.empty } plain
+  assertBool (either (const False) (const True) (F.parsePdfFile (BL.toStrict open)))
+  -- an encrypted file
+  let Right file = F.parsePdfFile (BL.toStrict plain)
+  r3 <- F.encryptPdfFile enc file { F.pdfTrailer = M.insert "Encrypt" (F.Dict M.empty) (F.pdfTrailer file) }
+  left_with "already encrypted" r3
+  -- a PDF/A document
+  let Right pdfa = P.renderPdfE P.standardDocInfo rect (A.setPDFA (A.pdfa3b fakeIcc) >> P.addPage Nothing >> return ())
+  r4 <- encryptPdf enc pdfa
+  left_with "PDF/A" r4
+  -- a signed document
+  let unsigned = P.renderPdf P.standardDocInfo rect (P.addPage Nothing >>= \p -> addSignature p signature)
+  Right signed <- signPdf (const (return (BS.pack [1, 2, 3]))) unsigned
+  r5 <- encryptPdf enc signed
+  left_with "signed" r5
+  -- the same user password and owner password
+  r6 <- encryptPdf (F.encryption (T.pack "same") (T.pack "same")) plain
+  left_with "cannot be the user password" r6
+  -- PDF/A in the XMP metadata only, or an /S that is a reference
+  let catalog_of f = let Just (F.Ref root _) = M.lookup "Root" (F.pdfTrailer f) in root
+      with_catalog f extra objects =
+        let root = catalog_of f
+            Just (F.Plain (F.Dict c)) = F.getObject f root
+        in f { F.pdfObjects = IM.union (IM.fromList ((root, (0, F.Plain (F.Dict (M.union extra c)))) : objects)) (F.pdfObjects f) }
+      xmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><pdfaid:part>3</pdfaid:part></x:xmpmeta>"
+      by_xmp = with_catalog file (M.singleton "Metadata" (F.Ref 90 0))
+                 [(90, (0, F.Stream (M.fromList [("Type", F.Name "Metadata"), ("Subtype", F.Name "XML")]) xmp))]
+      by_reference = with_catalog file (M.singleton "OutputIntents" (F.Array [F.Dict (M.fromList [("Type", F.Name "OutputIntent"), ("S", F.Ref 91 0)])]))
+                       [(91, (0, F.Plain (F.Name "GTS_PDFA1")))]
+  F.encryptPdfFile enc by_xmp >>= left_with "PDF/A"
+  F.encryptPdfFile enc by_reference >>= left_with "PDF/A"
+  -- an encrypted file with an empty user password: it is encrypted again
+  -- only with all its permissions, or when the caller says so.
+  -- See Note [Permissions of a decrypted file] in Graphics.PDF.File.Crypt
+  restricted <- BL.fromStrict <$> fixture "r6-aes-256-empty-user-restricted"
+  encryptPdf enc restricted >>= left_with "permissions of the file are restricted"
+  again <- encryptPdf enc { F.encIgnoreSourcePermissions = True } restricted
+  assertBool (either (const False) (const True) (again >>= with_password "user" . BL.toStrict))
+  -- the owner password gives all the rights
+  Right by_owner <- with_password "owner" <$> fixture "r6-aes-256-restricted"
+  F.encryptPdfFile enc by_owner >>= assertBool . either (const False) (const True)
+  -- a file with all the permissions
+  open_file <- BL.fromStrict <$> fixture "r3-rc4-128-empty-user"
+  encryptPdf enc open_file >>= assertBool . either (const False) (const True)
+
+-- The extensions of the catalog stay, and an annotation with a /ByteRange
+-- is encrypted: it is not a signature.
+-- See Note [Encryption of a file] in Graphics.PDF.File.Encrypt
+test_encryptionKeepsTheFile :: IO ()
+test_encryptionKeepsTheFile = do
+  let Right file = F.parsePdfFile (BL.toStrict (P.renderPdf P.standardDocInfo (P.PDFRect 0 0 300 200) (P.addPage Nothing >> return ())))
+      Just (F.Ref root _) = M.lookup "Root" (F.pdfTrailer file)
+      Just (F.Plain (F.Dict catalog)) = F.getObject file root
+      adbe level = F.Dict (M.fromList [("BaseVersion", F.Name "1.7"), ("ExtensionLevel", F.Integer level)])
+      with_adbe v = file { F.pdfObjects = IM.insert root (0, F.Plain (F.Dict (M.insert "Extensions" (F.Dict (M.singleton "ADBE" v)) catalog))) (F.pdfObjects file) }
+      enc = F.encryption (T.pack "user") (T.pack "owner")
+      adbe_after f = do
+        Right e <- F.encryptPdfFile enc f
+        case with_password "user" (BL.toStrict (F.renderPdfFile e)) of
+          Right d | Just (F.Plain (F.Dict c)) <- F.getObject d root, Just (F.Dict x) <- M.lookup "Extensions" c -> return (M.lookup "ADBE" x)
+          _ -> assertFailure "no /Extensions"
+  -- a level of 8 or more stays, a lower level becomes 8
+  adbe_after (with_adbe (adbe 11)) >>= assertEqual (Just (adbe 11))
+  adbe_after (with_adbe (adbe 3)) >>= assertEqual (Just (adbe 8))
+  adbe_after (with_adbe (F.Array [adbe 3])) >>= assertEqual (Just (F.Array [adbe 3, adbe 8]))
+  -- an annotation with /ByteRange and /Contents
+  let note = F.Plain (F.Dict (M.fromList [ ("Type", F.Name "Annot"), ("Subtype", F.Name "Text"), ("Filter", F.Name "X")
+                                         , ("ByteRange", F.Array []), ("Contents", F.String "A secret note") ]))
+      with_note = file { F.pdfObjects = IM.insert 90 (0, note) (F.pdfObjects file) }
+  Right e <- F.encryptPdfFile enc with_note
+  let raw = BL.toStrict (F.renderPdfFile e)
+  assertBool (not ("A secret note" `BS.isInfixOf` raw))
+  assertEqual (Right (Just note)) (flip F.getObject 90 <$> with_password "user" raw)
+
+-- A document is encrypted, then signed: the /Contents of the signature is
+-- not encrypted, and the other strings of the signature are.
+-- See Note [Objects that are not encrypted] in Graphics.PDF.File.Crypt
+test_encryptedThenSigned :: IO ()
+test_encryptedThenSigned = do
+  let unsigned = P.renderPdf P.standardDocInfo (P.PDFRect 0 0 300 200) $ do
+        page <- P.addPage Nothing
+        addSignature page signature { sigName = T.pack "A. Signer", sigSize = 64 }
+  Right encrypted <- encryptPdf (F.encryption (T.pack "user") (T.pack "owner")) unsigned
+  ref <- newIORef BL.empty
+  r <- signPdf (\bytes -> writeIORef ref bytes >> return (BS.pack [0xDE, 0xAD])) encrypted
+  case r of
+    Left e -> assertFailure e
+    Right signed -> do
+      -- the signature is on all the bytes, except the /Contents
+      signed_bytes <- readIORef ref
+      assertEqual (BL.length encrypted - 130) (BL.length signed_bytes)
+      assertBool (not (C.pack "(A. Signer)" `BS.isInfixOf` BL.toStrict signed))
+      case with_password "user" (BL.toStrict signed) of
+        Left e -> assertFailure e
+        Right f -> do
+          let signatures = [ d | (_, F.Plain (F.Dict d)) <- IM.elems (F.pdfObjects f), M.member "ByteRange" d ]
+          assertEqual [Just (F.String (BS.pack (0xDE : 0xAD : replicate 62 0)))] (map (M.lookup "Contents") signatures)
+          assertEqual [Just (F.String (C.pack "A. Signer"))] (map (M.lookup "Name") signatures)
 
 -- | The files of Test/encrypted, with the user password "user" and the
 -- owner password "owner". See Test/encrypted/README
@@ -264,10 +464,26 @@ test_badEncryption = do
 
 -- A file that is not correct gives Left, and never an exception
 test_malformedEncryptedFiles :: IO ()
-test_malformedEncryptedFiles = forM_ ["r4-aes-128", "r6-aes-256", "r3-rc4-128"] $ \name -> do
-  bytes <- fixture name
+test_malformedEncryptedFiles = forM_ ["r4-aes-128", "r6-aes-256", "r3-rc4-128"] $ \name ->
+  fixture name >>= check_malformed
+
+-- | Prefixes and mutations of an encrypted file (the user password is
+-- "user"): each one gives Left or a file, and never an exception
+check_malformed :: BS.ByteString -> IO ()
+check_malformed bytes = do
   let outcome b = case with_password "user" b of
         Left e -> length e
         Right f -> fromIntegral (BL.length (F.renderPdfFile f))
   forM_ [0, 7 .. BS.length bytes] $ \n -> evaluate (outcome (BS.take n bytes)) >>= assertBool . (>= 0)
   forM_ (mutationsOf 1000 bytes) $ \m -> evaluate (outcome m) >>= assertBool . (>= 0)
+
+-- The same, for a file that HPDF encrypted: an /Info object, a direct
+-- /Encrypt with /Perms, and a classic cross-reference table
+test_malformedHpdfFiles :: IO ()
+test_malformedHpdfFiles = do
+  Right helvetica <- P.mkStdFont P.Helvetica
+  let doc = P.renderPdf P.standardDocInfo { P.author = T.pack "An author" } (P.PDFRect 0 0 300 200) $ do
+        page <- P.addPage Nothing
+        P.drawWithPage page (P.drawText (P.text (P.PDFFont helvetica 12) 10 150 (T.pack "Hello")))
+  Right encrypted <- encryptPdf (F.encryption (T.pack "user") (T.pack "owner")) doc
+  check_malformed (BL.toStrict encrypted)

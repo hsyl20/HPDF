@@ -16,8 +16,9 @@
 -- security handler encrypts (RC4, AES-128, AES-256), with a password
 -- ('parsePdfFileWithPassword'), and records the permissions of the file
 -- ('pdfPermissions'): it does not apply them, and the writer writes a
--- file that is not encrypted. It does not repair a file whose
--- cross-reference is not correct. The writer gives
+-- file that is not encrypted. 'encryptPdfFile' encrypts a file with
+-- AES-256. The reader does not repair a file whose cross-reference is
+-- not correct. The writer gives
 -- a file with one cross-reference table. A file is the objects of the
 -- document, as values ('PdfFile'): the structure of the file (object
 -- streams, cross-reference streams, linearization) is not kept.
@@ -49,6 +50,10 @@ module Graphics.PDF.File
   , noPermissions
   , permissionsValue
   , permissionsFromValue
+    -- * Encryption
+  , encryptPdfFile
+  , Encryption(..)
+  , encryption
     -- * Objects
   , dictLookup
   , realToRational
@@ -66,6 +71,7 @@ import Control.Exception (IOException, try)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Text as T
+import Graphics.PDF.File.Encrypt
 import Graphics.PDF.File.Filter
 import Graphics.PDF.File.Parse
 import Graphics.PDF.File.Lexer (parseValue, parseValueWith)
