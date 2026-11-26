@@ -1,11 +1,17 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | JPEG images
-module Tests.Image (htf_thisModulesTests) where
+module Tests.Image (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
 import Tests.Common
 import Graphics.PDF
+
+tests :: TestTree
+tests = testGroup "Image"
+  [ test "decodeTick" test_decodeTick
+  , test "bounds" test_bounds
+  ]
+
 
 test_decodeTick :: IO()
 test_decodeTick = case (readJpegDataURL raw_jpeg) of

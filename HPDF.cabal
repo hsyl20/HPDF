@@ -70,14 +70,13 @@ Test-Suite HPDF-Tests
   -- pattern is a failure of the test.
   ghc-options:       -Wall -Wno-incomplete-uni-patterns -Wno-name-shadowing -Wno-type-defaults
   Build-depends:     base >= 4,
-                     HTF >= 0.10,
+                     tasty >= 1.4,
+                     tasty-hunit >= 0.10,
                      HPDF,
                      bytestring,
                      containers,
                      directory,
                      text
-  build-tool-depends:
-    HTF:htfpp
   Default-language:  Haskell2010
   
 Executable HPDF-Demo

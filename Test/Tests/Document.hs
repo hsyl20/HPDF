@@ -1,9 +1,8 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | The document monad: steps, sections, pages, lazy and strict drawings
-module Tests.Document (htf_thisModulesTests) where
+module Tests.Document (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
 import Tests.Common
 import Graphics.PDF
 import qualified Data.ByteString as BS
@@ -12,6 +11,18 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef
+
+tests :: TestTree
+tests = testGroup "Document"
+  [ test "pdft" test_pdft
+  , test "steps" test_steps
+  , test "sectionResult" test_sectionResult
+  , test "pageDrawnInSteps" test_pageDrawnInSteps
+  , test "lazyAndStrictDrawings" test_lazyAndStrictDrawings
+  , test "documentWithoutPage" test_documentWithoutPage
+  , test "plainDocumentUnchanged" test_plainDocumentUnchanged
+  ]
+
 
 -- | The PDF monad transformer runs base monad effects in order and generates
 -- the same document as the pure PDF monad

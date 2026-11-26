@@ -1,9 +1,8 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | TrueType fonts: parsing, subsets, text with two-byte glyph codes
-module Tests.TrueType (htf_thisModulesTests) where
+module Tests.TrueType (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
 import Tests.Common
 import Graphics.PDF
 import qualified Data.ByteString as BS
@@ -16,6 +15,24 @@ import Control.Exception (evaluate)
 import Data.Char (isUpper, ord)
 import Data.Either (isRight)
 import Text.Printf (printf)
+
+tests :: TestTree
+tests = testGroup "TrueType"
+  [ test "subsetKeepsGlyphsAndIds" test_subsetKeepsGlyphsAndIds
+  , test "subsetClosesOverComposites" test_subsetClosesOverComposites
+  , test "subsetFontInDocument" test_subsetFontInDocument
+  , test "subsetFontTypeset" test_subsetFontTypeset
+  , test "fontsWithTheSameName" test_fontsWithTheSameName
+  , test "fontOfThePreviousTextObject" test_fontOfThePreviousTextObject
+  , test "charactersThatAreNotShown" test_charactersThatAreNotShown
+  , test "locaNotIncreasing" test_locaNotIncreasing
+  , test "fontNameAndGlyphZero" test_fontNameAndGlyphZero
+  , test "cmapRangesAreBounded" test_cmapRangesAreBounded
+  , test "malformedFontsDoNotThrow" test_malformedFontsDoNotThrow
+  , test "subsetKeepsSharedAdvance" test_subsetKeepsSharedAdvance
+  , test "glueWithoutSpaceGlyph" test_glueWithoutSpaceGlyph
+  ]
+
 
 test_subsetKeepsGlyphsAndIds :: IO ()
 test_subsetKeepsGlyphsAndIds = withTestFont $ \bytes d -> do
@@ -41,7 +58,7 @@ test_subsetClosesOverComposites = withTestFont $ \bytes d -> do
   let composites = [ (g, cs) | c <- ['À' .. 'ž'] ++ ['Ѐ' .. 'ӿ'], let g = glyphOf d c, g /= 0
                              , let cs = trueTypeGlyphComponents bytes g, not (null cs) ]
   case composites of
-    [] -> unitTestPending "the test font has no composite glyph in Latin-1/Latin Extended-A/Cyrillic"
+    [] -> skipTest "the test font has no composite glyph in Latin-1/Latin Extended-A/Cyrillic"
     (g, cs) : _ -> case subsetTrueType bytes (IS.singleton g) of
       Left e -> assertFailure e
       Right (_, kept) -> assertBool (all (`IS.member` kept) (g : cs))

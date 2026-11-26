@@ -1,21 +1,29 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
--- htfpp adds a list of the tests of this module, which has no test
-{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 -- | The test suite of HPDF. Each module of Tests has the tests of one
 -- feature.
 module Main (main) where
 
-import Test.Framework
-import {-@ HTF_TESTS @-} Tests.Image
-import {-@ HTF_TESTS @-} Tests.Fonts
-import {-@ HTF_TESTS @-} Tests.TrueType
-import {-@ HTF_TESTS @-} Tests.Document
-import {-@ HTF_TESTS @-} Tests.Typesetting
-import {-@ HTF_TESTS @-} Tests.Numbers
-import {-@ HTF_TESTS @-} Tests.Colours
-import {-@ HTF_TESTS @-} Tests.PDFA
-import {-@ HTF_TESTS @-} Tests.EmbeddedFiles
-import {-@ HTF_TESTS @-} Tests.Signature
+import Test.Tasty (defaultMain, testGroup)
+import qualified Tests.Image
+import qualified Tests.Fonts
+import qualified Tests.TrueType
+import qualified Tests.Document
+import qualified Tests.Typesetting
+import qualified Tests.Numbers
+import qualified Tests.Colours
+import qualified Tests.PDFA
+import qualified Tests.EmbeddedFiles
+import qualified Tests.Signature
 
 main :: IO ()
-main = htfMain htf_importedTests
+main = defaultMain $ testGroup "HPDF"
+  [ Tests.Image.tests
+  , Tests.Fonts.tests
+  , Tests.TrueType.tests
+  , Tests.Document.tests
+  , Tests.Typesetting.tests
+  , Tests.Numbers.tests
+  , Tests.Colours.tests
+  , Tests.PDFA.tests
+  , Tests.EmbeddedFiles.tests
+  , Tests.Signature.tests
+  ]

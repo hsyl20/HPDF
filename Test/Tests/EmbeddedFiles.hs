@@ -1,9 +1,8 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | Embedded and associated files
-module Tests.EmbeddedFiles (htf_thisModulesTests) where
+module Tests.EmbeddedFiles (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
 import Tests.Common
 import Graphics.PDF
 import Graphics.PDF.Archive
@@ -11,6 +10,13 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
+
+tests :: TestTree
+tests = testGroup "EmbeddedFiles"
+  [ test "filespecNames" test_filespecNames
+  , test "embeddedFilesOrder" test_embeddedFilesOrder
+  ]
+
 
 attach :: String -> PDF ()
 attach n = () <$ embedAssociatedFile (associatedFile (T.pack n) "text/xml" (BL.fromStrict (C.pack "<x/>")))

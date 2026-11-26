@@ -1,9 +1,9 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | Digital signatures
-module Tests.Signature (htf_thisModulesTests) where
+module Tests.Signature (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
+import Tests.Common
 import Graphics.PDF
 import Graphics.PDF.Archive
 import Graphics.PDF.Signature
@@ -12,6 +12,13 @@ import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
 import Data.IORef
+
+tests :: TestTree
+tests = testGroup "Signature"
+  [ test "signature" test_signature
+  , test "signatureWithKey" test_signatureWithKey
+  ]
+
 
 -- A signature field reserves the space of the signature, and 'signPdf'
 -- writes the signature of the other bytes of the document.
