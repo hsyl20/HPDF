@@ -20,6 +20,7 @@ import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as M
+import Graphics.PDF.File.Permissions (Permissions)
 
 -- | A dictionary. The keys are the bytes of the names, without the @/@
 -- and with their @#xx@ escapes decoded.
@@ -65,6 +66,12 @@ data PdfFile = PdfFile
   { pdfVersion :: !(Int, Int) -- ^ The version of the header, for example (1, 7)
   , pdfTrailer :: !Dict -- ^ The trailer: @/Root@, @/Info@, @/ID@. It has no @/Size@ and no @/Prev@
   , pdfObjects :: !(IM.IntMap (Int, Object)) -- ^ Each object, with its generation number
+  , pdfPermissions :: !(Maybe Permissions)
+    -- ^ The permissions of an encrypted file that the reader opened with
+    -- the user password. 'Nothing': all the rights (the file is not
+    -- encrypted, or the owner password opened it). The reader does not
+    -- apply them: the caller does. See Note [Permissions of a decrypted
+    -- file] in Graphics.PDF.File.Crypt
   } deriving (Eq, Show)
 
 -- | The value of a key. A @null@ value is the same as no value.

@@ -1,0 +1,42 @@
+Encrypted PDF files for the tests (Test/Tests/Encryption.hs)
+
+source.pdf is the output of source.hs (HPDF): one page with the text
+"Encrypted text", and the author "HPDF fixture" in the trailer.
+source-metadata.pdf is the same document with a metadata stream
+("Metadata in clear text").
+
+qpdf 12.4.2 encrypted it with the user password "user" and the owner
+password "owner" (make-fixtures.sh), into one file for each revision of the
+standard security handler:
+
+  r2-rc4-40.pdf              /R 2, RC4 40 bits
+  r3-rc4-128.pdf             /R 3, RC4 128 bits
+  r3-rc4-128-empty-user.pdf  /R 3, RC4 128 bits, an empty user password
+  r4-rc4-128.pdf             /R 4, RC4 128 bits (crypt filter /V2)
+  r4-aes-128.pdf             /R 4, AES-128 (/AESV2), with object streams
+  r5-aes-256.pdf             /R 5, AES-256 (Adobe extension level 3)
+  r6-aes-256.pdf             /R 6, AES-256 (PDF 2.0), with object streams
+
+and, from source-metadata.pdf, with /EncryptMetadata false (the metadata
+stream is not encrypted; for /R 4 this changes the key of the file):
+
+  r4-aes-128-clear-metadata.pdf  /R 4, AES-128
+  r6-aes-256-clear-metadata.pdf  /R 6, AES-256
+
+and:
+
+  r3-rc4-128-metadata.pdf        /R 3, from source-metadata.pdf
+  r3-rc4-128-pdfdoc.pdf          /R 3, the passwords "l’été" (user) and
+                                 "5€" (owner), in PDFDocEncoding
+  r3-rc4-128-restricted.pdf      /R 3, no permission except accessibility
+  r6-aes-256-restricted.pdf      /R 6, the same permissions
+  r6-aes-256-empty-user-restricted.pdf
+                                 /R 6, an empty user password, and the
+                                 permission to print (low quality)
+  r6-aes-256-same-passwords.pdf  /R 6, "same" is the user password and
+                                 the owner password
+
+qpdf is an implementation of the handler that is independent of HPDF. To
+make the files again, in this directory:
+
+  docker run --rm -v "$PWD":/w -w /w debian:sid sh make-fixtures.sh

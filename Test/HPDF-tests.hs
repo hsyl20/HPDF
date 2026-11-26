@@ -14,6 +14,7 @@ import qualified Tests.PDFA
 import qualified Tests.EmbeddedFiles
 import qualified Tests.Signature
 import qualified Tests.PdfFile
+import qualified Tests.Encryption
 
 main :: IO ()
 main = defaultMain $ testGroup "HPDF"
@@ -28,4 +29,5 @@ main = defaultMain $ testGroup "HPDF"
   , Tests.EmbeddedFiles.tests
   , Tests.Signature.tests
   , Tests.PdfFile.tests
+  , Tests.Encryption.tests
   ]

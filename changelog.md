@@ -149,11 +149,18 @@
      again with one cross-reference table. The reader knows the
      cross-reference tables with their updates (/Prev), the
      cross-reference streams and object streams of PDF 1.5, and the
-     hybrid files. It does not decrypt a file, and it does not repair a
-     file whose offsets are wrong. It is total, with limits of memory
-     (`Limits`). A signature field that is not signed is written so that
-     `signPdf` can still sign the file. New example: `HPDF-Rewrite-Demo`
-     (Test/rewrite.hs).
+     hybrid files. It does not repair a file whose offsets are wrong. It
+     is total, with limits of memory (`Limits`). A signature field that is
+     not signed is written so that `signPdf` can still sign the file. New
+     example: `HPDF-Rewrite-Demo` (Test/rewrite.hs).
+   * Read encrypted PDF files: `parsePdfFileWithPassword` and
+     `readPdfFileWithPassword` decrypt a file with its user password or its
+     owner password. The reader knows all the revisions of the standard
+     security handler: RC4 40 to 128 bits (/R 2 to 4), AES-128 (/R 4) and
+     AES-256 (/R 5 and 6). `parsePdfFile` reads an encrypted file whose
+     user password is empty. `pdfPermissions` has the permissions of a file
+     that the user password opened (`Permissions`); the reader does not
+     apply them, and a file written again is not encrypted.
 
 ## 1.8
 

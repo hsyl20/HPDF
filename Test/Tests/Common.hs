@@ -188,6 +188,22 @@ advanceOf b g = do
   let n = u16 hh 34
   pure (u16 hm (4 * min g (n - 1)))
 
+-- | Some files that are a file with a small change: a byte that is
+-- replaced, bytes that are removed, or a number that is inserted. The
+-- changes come from a linear congruential generator: they are the same
+-- for each run.
+mutationsOf :: Int -> BS.ByteString -> [BS.ByteString]
+mutationsOf count bytes = take count (map mutate (triples numbers))
+  where
+    numbers = drop 1 (iterate (\x -> (x * 1103515245 + 12345) `mod` 2147483648) (7 :: Int))
+    mutate (r1, r2, r3) = case r1 `mod` 3 of
+      0 -> let i = r2 `mod` BS.length bytes
+           in BS.concat [BS.take i bytes, BS.singleton (fromIntegral r3), BS.drop (i + 1) bytes]
+      1 -> let i = r2 `mod` BS.length bytes in BS.take i bytes <> BS.drop (i + 1 + r3 `mod` 20) bytes
+      _ -> let i = r2 `mod` BS.length bytes in BS.concat [BS.take i bytes, C.pack (show (r3 `mod` 100000)), BS.drop i bytes]
+    triples (a : b : c : rest) = (a, b, c) : triples rest
+    triples _ = []
+
 -- | Offsets of every occurrence of a needle.
 occurrences :: BS.ByteString -> BS.ByteString -> [Int]
 occurrences needle = go 0
