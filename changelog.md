@@ -151,7 +151,9 @@
      cross-reference streams and object streams of PDF 1.5, and the
      hybrid files. It does not decrypt a file, and it does not repair a
      file whose offsets are wrong. It is total, with limits of memory
-     (`Limits`). New example: `HPDF-Rewrite-Demo` (Test/rewrite.hs).
+     (`Limits`). A signature field that is not signed is written so that
+     `signPdf` can still sign the file. New example: `HPDF-Rewrite-Demo`
+     (Test/rewrite.hs).
 
 ## 1.8
 

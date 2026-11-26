@@ -2,7 +2,7 @@
 -- | Digital signatures
 module Tests.Signature (tests) where
 
-import Test.Tasty (TestTree, testGroup)
+import Test.Tasty (TestTree, localOption, mkTimeout, testGroup)
 import Tests.Common
 import Graphics.PDF
 import Graphics.PDF.Archive
@@ -11,13 +11,100 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
+import qualified Data.IntMap.Strict as IM
+import qualified Data.Map.Strict as M
 import Data.IORef
+import qualified Graphics.PDF.File as F
 
 tests :: TestTree
 tests = testGroup "Signature"
   [ test "signature" test_signature
   , test "signatureWithKey" test_signatureWithKey
+  , test "rewrittenSignature" test_rewrittenSignature
+  , test "rewrittenSignatureNotAnnotation" test_rewrittenSignatureNotAnnotation
+  , localOption (mkTimeout 10000000) (test "manySignatureDictionaries" test_manySignatureDictionaries)
   ]
+
+-- | A file with one page, and other objects from the number 4
+file_with :: [F.Object] -> F.PdfFile
+file_with others = F.PdfFile (1, 7) (M.fromList [("Root", F.Ref 1 0)]) $ IM.fromList $
+  [ (1, (0, F.Plain (F.Dict (M.fromList [("Type", F.Name "Catalog"), ("Pages", F.Ref 2 0)]))))
+  , (2, (0, F.Plain (F.Dict (M.fromList [("Type", F.Name "Pages"), ("Kids", F.Array [F.Ref 3 0]), ("Count", F.Integer 1)]))))
+  , (3, (0, F.Plain (F.Dict (M.fromList [("Type", F.Name "Page"), ("Parent", F.Ref 2 0)]))))
+  ] ++ zip [4 ..] (map (\o -> (0, o)) others)
+
+-- | A signature dictionary that is not signed, with n bytes for the
+-- signature
+unsigned_sig :: Int -> F.Object
+unsigned_sig n = F.Plain (F.Dict (M.fromList
+  [ ("Type", F.Name "Sig"), ("Filter", F.Name "Adobe.PPKLite"), ("SubFilter", F.Name "adbe.pkcs7.detached")
+  , ("ByteRange", F.Array (replicate 4 (F.Integer 0))), ("Contents", F.String (BS.replicate n 0)) ]))
+
+-- An annotation with a /ByteRange and a /Contents of zero bytes is not a
+-- signature: the writer does not give it the layout of a signature, and
+-- 'signPdf' signs the signature dictionary after it.
+-- See Note [Signatures of the writer] in Graphics.PDF.File.Write
+test_rewrittenSignatureNotAnnotation :: IO ()
+test_rewrittenSignatureNotAnnotation = do
+  let decoy = F.Plain (F.Dict (M.fromList
+        [ ("Type", F.Name "Annot"), ("Subtype", F.Name "Text"), ("Filter", F.Name "X")
+        , ("ByteRange", F.Array (replicate 4 (F.Integer 0))), ("Contents", F.String (BS.replicate 3 0)) ]))
+  r <- signPdf (const (return (BS.pack [0xDE, 0xAD]))) (F.renderPdfFile (file_with [decoy, unsigned_sig 64]))
+  case r >>= F.parsePdfFile . BL.toStrict of
+    Left e -> assertFailure e
+    Right f -> do
+      let contents n = case F.getObject f n of
+            Just (F.Plain (F.Dict d)) -> M.lookup "Contents" d
+            _ -> Nothing
+      assertEqual (Just (F.String (BS.replicate 3 0))) (contents 4)
+      assertEqual (Just (F.String (BS.pack (0xDE : 0xAD : replicate 62 0)))) (contents 5)
+
+-- The time of the writer is linear, also with many signature
+-- dictionaries, and each one gets its byte range.
+-- See Note [Signatures of the writer] in Graphics.PDF.File.Write
+test_manySignatureDictionaries :: IO ()
+test_manySignatureDictionaries = do
+  let count = 20000
+      bytes = F.renderPdfFile (file_with (replicate count (unsigned_sig 1)))
+      total = fromIntegral (BL.length bytes)
+  case F.parsePdfFile (BL.toStrict bytes) of
+    Left e -> assertFailure e
+    Right f -> do
+      let ranges = [ r | (_, F.Plain (F.Dict d)) <- IM.elems (F.pdfObjects f), Just (F.Array r) <- [M.lookup "ByteRange" d] ]
+      assertEqual count (length ranges)
+      -- each range excludes the "<00>" of its /Contents, and ends at the end of the file
+      assertBool (and [ b - a == 4 && b + c == total | [F.Integer 0, F.Integer a, F.Integer b, F.Integer c] <- ranges ])
+      assertEqual count (length [ () | [F.Integer 0, F.Integer _, F.Integer _, F.Integer _] <- ranges ])
+
+-- A document that is read and written again ('F.renderPdfFile') keeps a
+-- signature field that is not signed: 'signPdf' can sign it.
+-- See Note [Signatures of the writer] in Graphics.PDF.File.Write
+test_rewrittenSignature :: IO ()
+test_rewrittenSignature = do
+  let unsigned = renderPdf standardDocInfo {compressed = False} (PDFRect 0 0 300 200) $ do
+        page <- addPage Nothing
+        addSignature page signature {sigName = T.pack "A. Signer", sigSize = 64}
+  case F.parsePdfFile (BL.toStrict unsigned) of
+    Left e -> assertFailure e
+    Right file -> do
+      let rewritten = F.renderPdfFile file
+      ref <- newIORef BL.empty
+      r <- signPdf (\bytes -> writeIORef ref bytes >> return (BS.pack [0xDE, 0xAD])) rewritten
+      case r of
+        Left e -> assertFailure e
+        Right signed -> do
+          toSign <- readIORef ref
+          -- the signature excludes the /Contents only: "<" 128 zeros ">"
+          assertEqual (BL.length rewritten - 130) (BL.length toSign)
+          assertEqual (BL.length rewritten) (BL.length signed)
+          -- the file is read again with the same objects, and the signature
+          case F.parsePdfFile (BL.toStrict signed) of
+            Left e -> assertFailure e
+            Right file' -> do
+              let contents f = [ s | (_, F.Plain (F.Dict d)) <- IM.elems (F.pdfObjects f)
+                                   , Just (F.String s) <- [M.lookup "Contents" d] ]
+              assertEqual [BS.pack (0xDE : 0xAD : replicate 62 0)] (contents file')
+              assertEqual (IM.keys (F.pdfObjects file)) (IM.keys (F.pdfObjects file'))
 
 
 -- A signature field reserves the space of the signature, and 'signPdf'

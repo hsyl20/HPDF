@@ -13,9 +13,11 @@ module Graphics.PDF.File.Object
   , realToRational
   , getObject
   , resolveValue
+  , isSignatureDict
   ) where
 
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Char8 as C
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as M
 
@@ -75,6 +77,15 @@ dictLookup key d = case M.lookup key d of
 -- See Note [Real numbers of a PDF file]
 realToRational :: Integer -> Int -> Rational
 realToRational mantissa decimals = fromInteger mantissa / 10 ^ max 0 decimals
+
+-- | Is a dictionary a signature dictionary (PDF 32000-1, 12.8.1)? It has
+-- a /ByteRange array, a /Filter name, and no /Type or the /Type /Sig or
+-- /DocTimeStamp. Another dictionary (an annotation) can have these keys
+-- too, but not this /Type.
+isSignatureDict :: Dict -> Bool
+isSignatureDict d = case (dictLookup (C.pack "ByteRange") d, dictLookup (C.pack "Filter") d, dictLookup (C.pack "Type") d) of
+  (Just (Array _), Just (Name _), t) -> t `elem` [Nothing, Just (Name (C.pack "Sig")), Just (Name (C.pack "DocTimeStamp"))]
+  _ -> False
 
 -- | An object of the file
 getObject :: PdfFile -> Int -> Maybe Object

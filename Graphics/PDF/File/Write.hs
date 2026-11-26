@@ -20,6 +20,7 @@ import Text.Printf (printf)
 import qualified Data.Map.Strict as M
 import Data.Word (Word8)
 import Graphics.PDF.File.Object
+import Graphics.PDF.LowLevel.Signature (signatureKeys)
 import Graphics.PDF.LowLevel.Types (upperHexBytes)
 
 -- Note [Values of the writer]
@@ -123,22 +124,51 @@ escape_literal s
 --
 -- The objects keep their numbers and their generations; the table has a
 -- subsection for each run of numbers, so that a file whose numbers have
--- large gaps does not give a large table. An object 0 is not written. The /Length of a stream is the
--- length of its data. A signed file is written again with its signature,
--- but the signature is then not valid: it signs the bytes of the old file.
+-- large gaps does not give a large table. An object 0 is not written. The
+-- /Length of a stream is the length of its data. A signed file is written
+-- again with its signature, but the signature is then not valid: it signs
+-- the bytes of the old file. See Note [Signatures of the writer] for a
+-- file that is not signed.
+
+-- Note [Signatures of the writer]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- A signature dictionary that is not signed ('isSignatureDict', with a
+-- /Contents of only zero bytes) gets the layout of Note [Layout of a
+-- signature dictionary] in Graphics.PDF.LowLevel.Signature, with the two
+-- keys first:
+--
+--   5 0 obj
+--   <</ByteRange [0 120 4242 377]   (spaces to a fixed width)
+--   /Contents <0000...0000> /Filter /Adobe.PPKLite /Type /Sig ... >>
+--
+-- Thus 'Graphics.PDF.Signature.signPdfWith' can sign the file: for example
+-- a document that is encrypted after it is rendered.
+--
+-- The writer renders the objects two times. The first rendering gives the
+-- offsets and the length of the file: the length of a signature
+-- dictionary does not depend on its byte range. The second rendering
+-- gives each signature dictionary its byte range. The time is linear in
+-- the size of the file, also with many signature dictionaries.
 
 -- | The bytes of a PDF file.
 -- See Note [Files of the writer]
 renderPdfFile :: PdfFile -> L.ByteString
-renderPdfFile file = L.concat (header : bodies) <> B.toLazyByteString (xref <> trailer)
+renderPdfFile file = L.concat (header : bodies) <> rest
   where
+    rest = B.toLazyByteString (xref <> trailer)
     (major, minor) = pdfVersion file
     header = B.toLazyByteString (B.string7 ("%PDF-" ++ show major ++ "." ++ show minor ++ "\n%")
                                  <> B.word8 0xE2 <> B.word8 0xE3 <> B.word8 0xCF <> B.word8 0xD3 <> B.char7 '\n')
     -- the object numbers start at 1: an object 0 is not written
     objects = IM.toList (snd (IM.split 0 (pdfObjects file)))
-    bodies = [ B.toLazyByteString (render_object n g o) | (n, (g, o)) <- objects ]
-    offsets = scanl (+) (L.length header) (map L.length bodies)
+    -- See Note [Signatures of the writer]
+    first_bodies = [ B.toLazyByteString (render_object Nothing n g o) | (n, (g, o)) <- objects ]
+    offsets = scanl (+) (L.length header) (map L.length first_bodies)
+    total = last offsets + L.length rest
+    bodies = [ case o of
+                 Plain (Dict d) | Just _ <- unsigned_signature d -> B.toLazyByteString (render_object (Just (off, total)) n g o)
+                 _ -> body
+             | ((n, (g, o)), off, body) <- zip3 objects offsets first_bodies ]
     entries = IM.fromList (zip (map fst objects) (zip offsets (map (fst . snd) objects)))
     start_xref = last offsets
     size = maybe 1 ((+ 1) . fst) (IM.lookupMax entries)
@@ -153,6 +183,15 @@ renderPdfFile file = L.concat (header : bodies) <> B.toLazyByteString (xref <> t
       <> renderDict (M.insert (C.pack "Size") (Integer (fromIntegral size)) (pdfTrailer file))
       <> B.string7 ("\nstartxref\n" ++ show start_xref ++ "\n%%EOF\n")
 
+-- | A signature dictionary that is not signed: the number of bytes of its
+-- /Contents, and its other entries.
+-- See Note [Signatures of the writer]
+unsigned_signature :: Dict -> Maybe (Int, Dict)
+unsigned_signature d = case M.lookup (C.pack "Contents") d of
+  Just (String s) | isSignatureDict d, not (S.null s), S.all (== 0) s ->
+    Just (S.length s, M.delete (C.pack "ByteRange") (M.delete (C.pack "Contents") d))
+  _ -> Nothing
+
 -- | The numbers in runs of consecutive numbers. The input is sorted.
 runs :: [Int] -> [[Int]]
 runs = reverse . map reverse . List.foldl' add []
@@ -160,10 +199,20 @@ runs = reverse . map reverse . List.foldl' add []
     add (run@(prev : _) : done) n | n == prev + 1 = (n : run) : done
     add done n = [n] : done
 
-render_object :: Int -> Int -> Object -> B.Builder
-render_object n g o = B.string7 (show n ++ " " ++ show g ++ " obj\n") <> body <> B.string7 "\nendobj\n"
+-- | The bytes of an object. For a signature dictionary that is not
+-- signed: the offset of the object and the length of the file, when they
+-- are known. See Note [Signatures of the writer]
+render_object :: Maybe (Int64, Int64) -> Int -> Int -> Object -> B.Builder
+render_object at n g o = B.string7 obj_header <> body <> B.string7 "\nendobj\n"
   where
+    obj_header = show n ++ " " ++ show g ++ " obj\n"
+    -- the keys come after the object header and "<<"
+    keys_at = fmap (\(offset, total) -> (offset + fromIntegral (length obj_header) + 2, total)) at
     body = case o of
+      Plain (Dict d) | Just (size, others) <- unsigned_signature d ->
+        B.string7 "<<" <> B.lazyByteString (signatureKeys keys_at size)
+          <> mconcat [ B.char7 ' ' <> render_name k <> B.char7 ' ' <> renderValue x | (k, x) <- M.toList others ]
+          <> B.string7 " >>"
       Plain v -> renderValue v
       Stream d bytes -> renderDict (M.insert (C.pack "Length") (Integer (fromIntegral (S.length bytes))) d)
         <> B.string7 "\nstream\n" <> B.byteString bytes <> B.string7 "\nendstream"
