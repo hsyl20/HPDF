@@ -55,7 +55,21 @@ Test-Suite HPDF-Tests
   Type:              exitcode-stdio-1.0
   Main-is:           HPDF-tests.hs
   hs-source-dirs:    Test
-  Build-depends:     base >= 4, 
+  Other-modules:     Tests.Colours
+                     Tests.Common
+                     Tests.Document
+                     Tests.EmbeddedFiles
+                     Tests.Fonts
+                     Tests.Image
+                     Tests.Numbers
+                     Tests.PDFA
+                     Tests.Signature
+                     Tests.TrueType
+                     Tests.Typesetting
+  -- A test uses partial patterns (`let Right x = ...`): a failure of the
+  -- pattern is a failure of the test.
+  ghc-options:       -Wall -Wno-incomplete-uni-patterns -Wno-name-shadowing -Wno-type-defaults
+  Build-depends:     base >= 4,
                      HTF >= 0.10,
                      HPDF,
                      bytestring,
