@@ -143,6 +143,15 @@
      image is read if its samples have 8 or 16 bits. The pixels of a file
      without an alpha channel go to the document as they are, with no
      decoding. A file that is not a correct PNG file gives `Left`.
+   * Read existing PDF files, `Graphics.PDF.File`: `readPdfFile` and
+     `parsePdfFile` give the objects of a file as values (`PdfFile`,
+     `Value`, `Object`), and `renderPdfFile` and `writePdfFile` write them
+     again with one cross-reference table. The reader knows the
+     cross-reference tables with their updates (/Prev), the
+     cross-reference streams and object streams of PDF 1.5, and the
+     hybrid files. It does not decrypt a file, and it does not repair a
+     file whose offsets are wrong. It is total, with limits of memory
+     (`Limits`). New example: `HPDF-Rewrite-Demo` (Test/rewrite.hs).
 
 ## 1.8
 

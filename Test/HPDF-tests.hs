@@ -13,6 +13,7 @@ import qualified Tests.Colours
 import qualified Tests.PDFA
 import qualified Tests.EmbeddedFiles
 import qualified Tests.Signature
+import qualified Tests.PdfFile
 
 main :: IO ()
 main = defaultMain $ testGroup "HPDF"
@@ -26,4 +27,5 @@ main = defaultMain $ testGroup "HPDF"
   , Tests.PDFA.tests
   , Tests.EmbeddedFiles.tests
   , Tests.Signature.tests
+  , Tests.PdfFile.tests
   ]

@@ -82,6 +82,25 @@ service), `signPdf` gives the bytes to sign to your function instead.
 A document has one signature, and the signature field is not visible. See
 `HPDF-Sign-Demo` (Test/sign.hs).
 
+## Reading a PDF file
+
+`Graphics.PDF.File` reads an existing PDF file into values, and writes it
+again:
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+import qualified Graphics.PDF.File as F
+
+main = do
+  Right file <- F.readPdfFile "in.pdf"
+  print (F.dictLookup "Root" (F.pdfTrailer file))
+  F.writePdfFile "out.pdf" file
+```
+
+The reader knows the cross-reference tables (with the updates of a file),
+the cross-reference streams and the object streams. It does not decrypt a
+file. `HPDF-Rewrite-Demo` (Test/rewrite.hs) reads a file and writes it again.
+
 ## Documentation
 
 The library documentation can be accessed on [Hackage](https://hackage.haskell.org/package/HPDF)
