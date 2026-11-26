@@ -1,9 +1,9 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | The form of the numbers in a document
-module Tests.Numbers (htf_thisModulesTests) where
+module Tests.Numbers (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
+import Tests.Common
 import Graphics.PDF
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C
@@ -11,6 +11,13 @@ import qualified Data.ByteString.Lazy as BL
 import Control.Exception (SomeException, catch, evaluate)
 import System.Directory (doesFileExist, getTemporaryDirectory, removeFile)
 import Text.Printf (printf)
+
+tests :: TestTree
+tests = testGroup "Numbers"
+  [ test "numbersWithFiveDecimals" test_numbersWithFiveDecimals
+  , test "numbersThatAreNotFinite" test_numbersThatAreNotFinite
+  ]
+
 
 -- A real number has five decimals at most, without the zeros at the end.
 -- It is the nearest to the exact value, and the even one on a tie.

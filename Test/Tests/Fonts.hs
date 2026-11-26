@@ -1,9 +1,8 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | Standard fonts, Type 1 fonts and AFM files
-module Tests.Fonts (htf_thisModulesTests) where
+module Tests.Fonts (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
 import Tests.Common
 import Graphics.PDF
 import qualified Data.ByteString as BS
@@ -14,6 +13,15 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Either (isRight)
 import Data.IORef
 import System.Directory (getTemporaryDirectory, removeFile)
+
+tests :: TestTree
+tests = testGroup "Fonts"
+  [ test "type1FontDescriptor" test_type1FontDescriptor
+  , test "afmFromFontTool" test_afmFromFontTool
+  , test "afmMalformed" test_afmMalformed
+  , test "fontDictionaryIsShared" test_fontDictionaryIsShared
+  ]
+
 
 -- | A custom Type 1 font has a font descriptor, an encoding with the glyph
 -- names and a font file without the PFB segment headers.

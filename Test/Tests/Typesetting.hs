@@ -1,9 +1,9 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | Typeset text
-module Tests.Typesetting (htf_thisModulesTests) where
+module Tests.Typesetting (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
+import Tests.Common
 import Graphics.PDF
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C
@@ -11,6 +11,12 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef
+
+tests :: TestTree
+tests = testGroup "Typesetting"
+  [ test "textInSeveralRectangles" test_textInSeveralRectangles
+  ]
+
 
 -- Text that does not fit in a rectangle continues in the next one. The
 -- boxes that fit in no rectangle are returned, and can be drawn later.

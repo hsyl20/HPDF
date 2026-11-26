@@ -1,14 +1,20 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | Colour operators
-module Tests.Colours (htf_thisModulesTests) where
+module Tests.Colours (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
+import Tests.Common
 import Graphics.PDF
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
+
+tests :: TestTree
+tests = testGroup "Colours"
+  [ test "deviceColours" test_deviceColours
+  ]
+
 
 -- A colour is written with the operators of its device colour space.
 -- See Note [Device colours] in Graphics.PDF.Draw

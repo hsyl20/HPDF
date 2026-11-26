@@ -1,9 +1,8 @@
-{-# OPTIONS_GHC -F -pgmF htfpp #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | PDF/A: structure, settings, fonts, colours and annotations
-module Tests.PDFA (htf_thisModulesTests) where
+module Tests.PDFA (tests) where
 
-import Test.Framework
+import Test.Tasty (TestTree, testGroup)
 import Tests.Common
 import Graphics.PDF
 import Graphics.PDF.Archive
@@ -14,6 +13,21 @@ import qualified Data.Text as T
 import Control.Exception (SomeException, catch, evaluate)
 import Data.Either (isRight)
 import System.Directory (doesFileExist, getTemporaryDirectory)
+
+tests :: TestTree
+tests = testGroup "PDFA"
+  [ test "pdfaStructure" test_pdfaStructure
+  , test "pdfaDocumentId" test_pdfaDocumentId
+  , test "pdfaSettingsAreChecked" test_pdfaSettingsAreChecked
+  , test "pdfaAnnotations" test_pdfaAnnotations
+  , test "pdfaColoursAndProfiles" test_pdfaColoursAndProfiles
+  , test "pdfaRefusesStandardFonts" test_pdfaRefusesStandardFonts
+  , test "pdfaProblemsAreNotIgnored" test_pdfaProblemsAreNotIgnored
+  , test "pdfaFontCheckIsNotByName" test_pdfaFontCheckIsNotByName
+  , test "pdfaAcceptsEmbeddedType1" test_pdfaAcceptsEmbeddedType1
+  , test "pdfaDeviceColours" test_pdfaDeviceColours
+  ]
+
 
 exampleExtension :: XMPExtension
 exampleExtension = XMPExtension (T.pack "Example schema") (T.pack "http://example.org/ns/") (T.pack "ex")
