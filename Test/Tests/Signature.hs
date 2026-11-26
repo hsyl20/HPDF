@@ -27,7 +27,7 @@ tests = testGroup "Signature"
 
 -- | A file with one page, and other objects from the number 4
 file_with :: [F.Object] -> F.PdfFile
-file_with others = F.PdfFile (1, 7) (M.fromList [("Root", F.Ref 1 0)]) $ IM.fromList $
+file_with others = (\objects -> F.PdfFile (1, 7) (M.fromList [("Root", F.Ref 1 0)]) objects Nothing) $ IM.fromList $
   [ (1, (0, F.Plain (F.Dict (M.fromList [("Type", F.Name "Catalog"), ("Pages", F.Ref 2 0)]))))
   , (2, (0, F.Plain (F.Dict (M.fromList [("Type", F.Name "Pages"), ("Kids", F.Array [F.Ref 3 0]), ("Count", F.Integer 1)]))))
   , (3, (0, F.Plain (F.Dict (M.fromList [("Type", F.Name "Page"), ("Parent", F.Ref 2 0)]))))

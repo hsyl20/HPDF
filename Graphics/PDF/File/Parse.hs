@@ -10,6 +10,7 @@ module Graphics.PDF.File.Parse
   , defaultLimits
   , parsePdfFile
   , parsePdfFileWith
+  , parsePdfFileWithPassword
   ) where
 
 import Control.Monad (foldM, forM, unless, when)
@@ -20,6 +21,8 @@ import Data.Char (isDigit)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import qualified Data.Map.Strict as M
+import qualified Data.Text as T
+import Graphics.PDF.File.Crypt (Decryptor, decryptObject, decryptorPermissions, openEncryption)
 import Graphics.PDF.File.Filter (decodeStream)
 import Graphics.PDF.File.Lexer
 import Graphics.PDF.File.Object
@@ -94,15 +97,27 @@ data Entry
 -- (/XRefStm of a hybrid file)
 data Section = Section !(M.Map Int Entry) !Dict !(Maybe Integer) !(Maybe Integer)
 
--- | Read a PDF file with the default limits
+-- | Read a PDF file with the default limits. An encrypted file is read if
+-- its user password is empty.
 parsePdfFile :: S.ByteString -> Either String PdfFile
 parsePdfFile = parsePdfFileWith defaultLimits
 
--- | Read a PDF file.
+-- | Read a PDF file. An encrypted file is read if its user password is
+-- empty.
 -- See Note [Order of the cross-reference sections] and Note [Objects that
 -- the reader removes]
 parsePdfFileWith :: Limits -> S.ByteString -> Either String PdfFile
-parsePdfFileWith limits bytes = prefix_error $ do
+parsePdfFileWith limits = parsePdfFileWithPassword limits T.empty
+
+-- | Read a PDF file, and decrypt it with a password if it is encrypted:
+-- the owner password or the user password. The 'PdfFile' is not
+-- encrypted: it has no /Encrypt. 'pdfPermissions' has the permissions of
+-- the file when the user password opened it; the reader does not apply
+-- them, and 'renderPdfFile' writes a file that is not encrypted.
+-- See Note [Standard security handler] and Note [Permissions of a
+-- decrypted file] in Graphics.PDF.File.Crypt
+parsePdfFileWithPassword :: Limits -> T.Text -> S.ByteString -> Either String PdfFile
+parsePdfFileWithPassword limits password bytes = prefix_error $ do
   (version, header) <- find_header bytes
   start <- find_startxref bytes
   let budget = Budget (limitTotal limits) (limitObjects limits)
@@ -112,20 +127,47 @@ parsePdfFileWith limits bytes = prefix_error $ do
     Left e | header > 0 -> either (const (Left e)) Right (read_with header)
     r -> r
   let trailer = foldr (M.unionWith (\newer _ -> newer)) M.empty trailers
-  when (M.member (C.pack "Encrypt") trailer) $
-    Left "the file is encrypted, and the reader cannot decrypt it"
   case dictLookup (C.pack "Root") trailer of
     Just (Ref _ _) -> Right ()
     _ -> Left "the trailer has no /Root"
-  objects <- load_objects limits bytes budget' entries
+  decryption <- case dictLookup (C.pack "Encrypt") trailer of
+    Nothing -> Right Nothing
+    Just e -> do
+      (number, d) <- encryption_dict entries e
+      case dictLookup (C.pack "Root") trailer of
+        Just (Ref r _) | Just r == number -> Left "the /Encrypt of the trailer is the catalog"
+        _ -> Right ()
+      let file_id = case dictLookup (C.pack "ID") trailer of
+            Just (Array (String s : _)) -> s
+            _ -> S.empty
+          no_password = if T.null password then (++ " (no password was given)") else id
+      dec <- either (Left . no_password) Right (openEncryption d file_id password)
+      Right (Just (dec, number))
+  objects <- load_objects limits bytes budget' entries decryption
+  let encryption_object n = maybe False ((== Just n) . snd) decryption
   Right PdfFile
     { pdfVersion = version
-    , pdfTrailer = foldr M.delete trailer (map C.pack xref_keys)
-    , pdfObjects = IM.filter (not . removed . snd) objects
+    , pdfTrailer = foldr M.delete trailer (map C.pack ("Encrypt" : xref_keys))
+    , pdfObjects = IM.filterWithKey (\n (_, o) -> not (removed o || encryption_object n)) objects
+    , pdfPermissions = decryption >>= decryptorPermissions . fst
     }
   where
     prefix_error = either (Left . ("PDF: " ++)) Right
     xref_keys = ["Size", "Prev", "XRefStm", "Type", "W", "Index", "Length", "Filter", "DecodeParms", "DL"]
+    -- the /Encrypt dictionary: direct, or an object of the file that is not
+    -- encrypted. See Note [Objects that are not encrypted] in Graphics.PDF.File.Crypt
+    --
+    -- The reader removes the /Encrypt object: it must not be an object of
+    -- the document (the catalog, a page). It has no /Type, or /Type /Encrypt
+    encryption_dict entries e = case e of
+      Dict d -> Right (Nothing, d)
+      Ref n g | Just (InFile off g') <- M.lookup n entries, g == g' -> do
+        (n', g'', object) <- read_object limits bytes (S.length bytes) (const Nothing) off
+        case object of
+          Plain (Dict d) | n' == n && g'' == g
+                         , dictLookup (C.pack "Type") d `elem` [Nothing, Just (Name (C.pack "Encrypt"))] -> Right (Just n, d)
+          _ -> Left "the /Encrypt of the trailer is not an encryption dictionary"
+      _ -> Left "the /Encrypt of the trailer is not correct"
 
 -- Note [Objects that the reader removes]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -137,7 +179,9 @@ parsePdfFileWith limits bytes = prefix_error $ do
 --   document;
 -- * the linearization dictionary (/Linearized): its offsets are wrong in
 --   a file that is written again;
--- * the free entries.
+-- * the free entries;
+-- * the /Encrypt dictionary of an encrypted file: the objects are
+--   decrypted.
 --
 -- The writer then gives a file with a cross-reference table
 -- (Graphics.PDF.File.Write).
@@ -454,15 +498,19 @@ integer_object bytes at = case runParser (integerToken >> integerToken >> keywor
   Right (n, _) | n >= 0 && n <= fromIntegral (S.length bytes) -> Just n
   _ -> Nothing
 
--- | Load the objects of the entries. The offsets of the entries are
--- offsets in the file.
--- See Note [Length of a stream] for the order
-load_objects :: Limits -> S.ByteString -> Budget -> M.Map Int Entry -> Either String (IM.IntMap (Int, Object))
-load_objects limits bytes budget entries = do
+-- | Load the objects of the entries, and decrypt them: the key, and the
+-- number of the /Encrypt object, which is not encrypted. The offsets of
+-- the entries are offsets in the file.
+-- See Note [Length of a stream] for the order, and Note [Objects that are
+-- not encrypted] in Graphics.PDF.File.Crypt
+load_objects :: Limits -> S.ByteString -> Budget -> M.Map Int Entry -> Maybe (Decryptor, Maybe Int)
+             -> Either String (IM.IntMap (Int, Object))
+load_objects limits bytes budget entries decryption = do
   let in_streams = M.fromListWith (++) [ (c, [(n, i)]) | (n, InStream c i) <- M.toList entries, n > 0 ]
-  -- 1. the object streams: a /Length in the file only
+  -- 1. the object streams: a /Length in the file only. An object stream is
+  -- decrypted, and its objects are not
   containers <- fmap IM.fromList . forM (M.keys in_streams) $ \c -> case M.lookup c entries of
-    Just (InFile off g) -> (\o -> (c, (g, o))) <$> load c off g in_file_length
+    Just (InFile off g) -> (\o -> (c, (g, o))) <$> (load c off g in_file_length >>= decrypt c g)
     _ -> Left ("the object " ++ show c ++ " is not an object stream of the file")
   (compressed, _) <- foldM (load_container containers) (IM.empty, budget) (M.toList in_streams)
   -- 2. the other objects: a /Length in the file or in an object stream
@@ -474,9 +522,12 @@ load_objects limits bytes budget entries = do
   loaded <- fmap IM.fromList . forM [ (n, off, g) | (n, InFile off g) <- M.toList entries, n > 0 ] $ \(n, off, g) ->
     case IM.lookup n containers of
       Just known -> Right (n, known)
-      Nothing -> (\o -> (n, (g, o))) <$> load n off g any_length
+      Nothing -> (\o -> (n, (g, o))) <$> (load n off g any_length >>= decrypt n g)
   Right (IM.union loaded compressed)
   where
+    decrypt n g o = case decryption of
+      Just (dec, encryption) | encryption /= Just n -> decryptObject dec n g o
+      _ -> Right o
     load n off g length_of = do
       (n', g', obj) <- read_object limits bytes (bound off) length_of off
       if n' == n && g' == g then Right obj

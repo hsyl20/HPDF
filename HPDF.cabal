@@ -20,6 +20,10 @@ description:
   folder. That file is giving an example of each feature.
 extra-source-files:
   Test/logo.jpg
+  Test/encrypted/README
+  Test/encrypted/make-fixtures.sh
+  Test/encrypted/source.hs
+  Test/encrypted/*.pdf
   Test/Penrose.hs
   Test/test.hs
   Test/unicode.hs
@@ -65,6 +69,7 @@ Test-Suite HPDF-Tests
                      Tests.Numbers
                      Tests.PDFA
                      Tests.PdfFile
+                     Tests.Encryption
                      Tests.Signature
                      Tests.TrueType
                      Tests.Typesetting
@@ -197,6 +202,9 @@ library
      Graphics.PDF.File.Write
      Graphics.PDF.File.Parse
      Graphics.PDF.File.ObjectStream
+     Graphics.PDF.File.Permissions
+     Graphics.PDF.File.Cipher
+     Graphics.PDF.File.Crypt
      Graphics.PDF.LowLevel.PNG
      Graphics.PDF.LowLevel.Signature
      Graphics.PDF.LowLevel.CMS

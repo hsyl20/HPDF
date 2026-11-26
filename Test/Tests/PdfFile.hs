@@ -651,13 +651,14 @@ test_streamLengths = do
       file = BS.concat [header, body, xref, "startxref\n", C.pack (show start), "\n%%EOF\n"]
   assertEqual (Right "0 0 m 1 1 l\n") (content file)
 
--- Encryption, and the limits of the reader.
--- See Note [Limits of the reader] in Graphics.PDF.File.Parse
+-- An encryption that is not complete, and the limits of the reader. See
+-- Tests.Encryption for the encrypted files, and Note [Limits of the
+-- reader] in Graphics.PDF.File.Parse
 test_refusedFiles :: IO ()
 test_refusedFiles = do
   let encrypted = classicFile " \n" documentObjects "/Encrypt << /Filter /Standard >>"
   case F.parsePdfFile encrypted of
-    Left e -> assertBoolVerbose e ("encrypted," `elem` words e)
+    Left e -> assertBoolVerbose e ("encryption" `elem` words e)
     Right _ -> assertFailure "an encrypted file was read"
   let file = xrefStreamFile defaultX
       parse limits = F.parsePdfFileWith limits file
@@ -681,21 +682,12 @@ test_malformedFiles = do
       outcome bytes = case F.parsePdfFile bytes of
         Left e -> length e
         Right f -> fromIntegral (BL.length (F.renderPdfFile f))
-      -- a small generator of numbers (a linear congruential generator)
-      numbers = drop 1 (iterate (\x -> (x * 1103515245 + 12345) `mod` 2147483648) (7 :: Int))
-      mutate bytes (r1, r2, r3) = case r1 `mod` 3 of
-        0 -> let i = r2 `mod` BS.length bytes
-             in BS.concat [BS.take i bytes, BS.singleton (fromIntegral r3), BS.drop (i + 1) bytes]
-        1 -> let i = r2 `mod` BS.length bytes in BS.take i bytes <> BS.drop (i + 1 + r3 `mod` 20) bytes
-        _ -> let i = r2 `mod` BS.length bytes in BS.concat [BS.take i bytes, C.pack (show (r3 `mod` 100000)), BS.drop i bytes]
-      triples (a : b : c : rest) = (a, b, c) : triples rest
-      triples _ = []
   mapM_ (\f -> mapM_ (\n -> evaluate (outcome (BS.take n f)) >>= assertBool . (>= 0)) [0 .. BS.length f]) files
   -- a part of the body is removed, and the end of the file is kept: the
   -- reader reads the cross-reference sections and fails later
   let tail_of f = BS.drop (BS.length f - 80) f
   mapM_ (\f -> mapM_ (\n -> evaluate (outcome (BS.take n f <> tail_of f)) >>= assertBool . (>= 0)) [0 .. BS.length f - 80]) files
-  mapM_ (\f -> mapM_ (\t -> evaluate (outcome (mutate f t)) >>= assertBool . (>= 0)) (take 2000 (triples numbers))) files
+  mapM_ (\f -> mapM_ (\m -> evaluate (outcome m) >>= assertBool . (>= 0)) (mutationsOf 2000 f)) files
 
 -- HPDF documents: read, write, read again.
 test_hpdfDocuments :: IO ()

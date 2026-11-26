@@ -12,8 +12,12 @@
 --
 -- The reader knows the cross-reference tables (with the updates of a
 -- file, /Prev), the cross-reference streams and the object streams of
--- PDF 1.5, and the hybrid files. It does not decrypt a file, and it does
--- not repair a file whose cross-reference is not correct. The writer gives
+-- PDF 1.5, and the hybrid files. It decrypts a file that the standard
+-- security handler encrypts (RC4, AES-128, AES-256), with a password
+-- ('parsePdfFileWithPassword'), and records the permissions of the file
+-- ('pdfPermissions'): it does not apply them, and the writer writes a
+-- file that is not encrypted. It does not repair a file whose
+-- cross-reference is not correct. The writer gives
 -- a file with one cross-reference table. A file is the objects of the
 -- document, as values ('PdfFile'): the structure of the file (object
 -- streams, cross-reference streams, linearization) is not kept.
@@ -33,10 +37,18 @@ module Graphics.PDF.File
   , readPdfFile
   , parsePdfFile
   , parsePdfFileWith
+  , readPdfFileWithPassword
+  , parsePdfFileWithPassword
   , Limits(..)
   , defaultLimits
   , renderPdfFile
   , writePdfFile
+    -- * Permissions of an encrypted file
+  , Permissions(..)
+  , allPermissions
+  , noPermissions
+  , permissionsValue
+  , permissionsFromValue
     -- * Objects
   , dictLookup
   , realToRational
@@ -53,19 +65,30 @@ module Graphics.PDF.File
 import Control.Exception (IOException, try)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Lazy as L
+import qualified Data.Text as T
 import Graphics.PDF.File.Filter
 import Graphics.PDF.File.Parse
 import Graphics.PDF.File.Lexer (parseValue, parseValueWith)
 import Graphics.PDF.File.Object
+import Graphics.PDF.File.Permissions
 import Graphics.PDF.File.Write
 
--- | Read a PDF file. 'Left' gives the reason the file cannot be read.
+-- | Read a PDF file. 'Left' gives the reason the file cannot be read. An
+-- encrypted file is read if its user password is empty.
 readPdfFile :: FilePath -> IO (Either String PdfFile)
-readPdfFile path = do
+readPdfFile path = read_with parsePdfFile path
+
+-- | Read a PDF file, and decrypt it with a password (the user password or
+-- the owner password) if it is encrypted. See 'parsePdfFileWithPassword'.
+readPdfFileWithPassword :: T.Text -> FilePath -> IO (Either String PdfFile)
+readPdfFileWithPassword password = read_with (parsePdfFileWithPassword defaultLimits password)
+
+read_with :: (S.ByteString -> Either String PdfFile) -> FilePath -> IO (Either String PdfFile)
+read_with parse path = do
   r <- try (S.readFile path)
   return $ case r of
     Left e -> Left (show (e :: IOException))
-    Right bytes -> parsePdfFile bytes
+    Right bytes -> parse bytes
 
 -- | Write a PDF file
 writePdfFile :: FilePath -> PdfFile -> IO ()
