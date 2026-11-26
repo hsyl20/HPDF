@@ -51,7 +51,7 @@ decodeStream limit dict raw = do
   case filters of
     [] -> if S.length raw <= limit then Right raw else Left "a stream is larger than the limit"
     [f] | f == C.pack "FlateDecode" -> do
-      (bytes, more) <- inflateUpTo "PDF" limit (L.fromStrict raw)
+      (bytes, more) <- inflateUpTo "FlateDecode" limit (L.fromStrict raw)
       if more then Left "a stream is larger than the limit" else predictor parms bytes
     _ -> Left ("the filters " ++ show (map C.unpack filters) ++ " are not supported")
   where
