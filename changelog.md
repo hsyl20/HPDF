@@ -149,8 +149,7 @@
      again with one cross-reference table. The reader knows the
      cross-reference tables with their updates (/Prev), the
      cross-reference streams and object streams of PDF 1.5, and the
-     hybrid files. It does not repair a file whose offsets are wrong. It
-     is total, with limits of memory (`Limits`). A signature field that is
+     hybrid files. It is total, with limits of memory (`Limits`). A signature field that is
      not signed is written so that `signPdf` can still sign the file. New
      example: `HPDF-Rewrite-Demo` (Test/rewrite.hs).
    * Read encrypted PDF files: `parsePdfFileWithPassword` and
@@ -185,6 +184,15 @@
      page of a file that was read, then `updatePdfFile` and `signPdfWith` sign the
      update. It also works for an encrypted and signed file.
      `HPDF-Sign-Demo` also writes documents with two signatures.
+   * Repair: the reader reads a file whose structure is not correct (a
+     wrong `startxref` or offset, no table, no `/Root`) with a scan of the
+     file, as poppler and qpdf do: the objects (the last one of each
+     number), the objects of the object streams (also encrypted), the
+     trailers and the cross-reference streams. An error of a value, of a
+     limit or of the password is not repaired. The scan is linear, and
+     the limits of the reader apply to it. `limitRepair` (True by
+     default) can stop it, and `sourceRepaired` tells it. An incremental
+     update of a repaired file is not possible.
 
 ## 1.8
 

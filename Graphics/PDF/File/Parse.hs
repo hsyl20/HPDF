@@ -15,7 +15,8 @@ module Graphics.PDF.File.Parse
   , parsePdfSource
   ) where
 
-import Control.Monad (foldM, forM, unless, when)
+import Control.Monad (foldM, forM, forM_, unless, when)
+import Data.List (isInfixOf)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Unsafe as SU
@@ -28,7 +29,7 @@ import Graphics.PDF.File.Crypt (Decryptor, decryptObject, decryptorPermissions, 
 import Graphics.PDF.File.Filter (decodeStream)
 import Graphics.PDF.File.Lexer
 import Graphics.PDF.File.Object
-import Graphics.PDF.File.ObjectStream (objectStreamObjects)
+import Graphics.PDF.File.ObjectStream (objectStreamNumbers, objectStreamObjects)
 
 -- Note [Limits of the reader]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -60,12 +61,17 @@ data Limits = Limits
   , limitTotal :: !Int -- ^ Bytes of all the decoded streams of a file
   , limitObjects :: !Int -- ^ Entries of all the cross-reference sections of a file
   , limitDepth :: !Int -- ^ Depth of the nesting of arrays and dictionaries
+  , limitRepair :: !Bool
+    -- ^ Repair a file whose cross-reference sections are not correct,
+    -- with a scan of the file. False: such a file gives 'Left'. See
+    -- Note [Repair of a file]
   } deriving (Eq, Show)
 
 -- | 256 MiB for a stream, 512 MiB for all the decoded streams, 2 million
--- cross-reference entries (about 300 MB of memory), and a depth of 256
+-- cross-reference entries (about 300 MB of memory), a depth of 256, and
+-- the repair of a file
 defaultLimits :: Limits
-defaultLimits = Limits (256 * 1024 * 1024) (512 * 1024 * 1024) 2000000 256
+defaultLimits = Limits (256 * 1024 * 1024) (512 * 1024 * 1024) 2000000 256 True
 
 -- | What a file can still use. See Note [Limits of the reader]
 data Budget = Budget
@@ -77,7 +83,7 @@ data Budget = Budget
 use_entries :: Int -> Budget -> Either String Budget
 use_entries n b
   | n <= budgetEntries b = Right b { budgetEntries = budgetEntries b - n }
-  | otherwise = Left "the file has too many cross-reference entries"
+  | otherwise = Left too_many_entries
 
 -- | The limit of the next decoded stream
 stream_limit :: Limits -> Budget -> Int
@@ -131,6 +137,7 @@ data PdfSource = PdfSource
   , sourceXrefStream :: !Bool -- ^ The newest cross-reference section is a stream
   , sourceSize :: !Int -- ^ The number after the numbers of the cross-reference sections (in use or free)
   , sourceEncryption :: !(Maybe (Decryptor, Value)) -- ^ The key of an encrypted file, and the /Encrypt of its trailer
+  , sourceRepaired :: !Bool -- ^ The reader repaired the file: see Note [Repair of a file]
   }
 
 -- | Read a PDF file for an incremental update, and decrypt it with a
@@ -138,21 +145,94 @@ data PdfSource = PdfSource
 parsePdfSource :: Limits -> T.Text -> S.ByteString -> Either String PdfSource
 parsePdfSource limits password bytes = prefix_error $ do
   (version, header) <- find_header bytes
-  start <- find_startxref bytes
   let budget = Budget (limitTotal limits) (limitObjects limits)
-      read_with base = read_sections limits bytes base budget start
-  -- See Note [Garbage before the header]
-  ((entries, trailers, budget'), base) <- case read_with 0 of
-    Left e | header > 0 -> either (const (Left e)) (\r -> Right (r, header)) (read_with header)
-    r -> (\x -> (x, 0)) <$> r
+      -- the structure of the file: see Note [Repair of a file]
+      structure = do
+        start <- find_startxref bytes
+        let read_with base = do
+              r@(entries, trailers, _) <- read_sections limits bytes base budget start
+              check_structure bytes entries trailers
+              Right r
+        -- See Note [Garbage before the header]
+        ((entries, trailers, budget'), base) <- case read_with 0 of
+          Left e | header > 0 -> either (const (Left e)) (\r -> Right (r, header)) (read_with header)
+          r -> (\x -> (x, 0)) <$> r
+        -- the section that "startxref" gives was read: its offset is in the file
+        (is_table, _) <- runParser (optionalKeyword "xref") bytes (fromInteger start + base)
+        Right (Sections start base (not is_table), entries, trailers, budget')
+      -- See Note [Repair of a file]
+      repaired = do
+        scan <- scan_file limits bytes budget
+        source_of limits password bytes version (Repaired (scan_containers scan)) (scan_entries scan)
+                  (scan_trailers scan) (scan_budget scan)
+  case structure of
+    Right (origin, entries, trailers, budget') -> source_of limits password bytes version origin entries trailers budget'
+    Left e | limitRepair limits, not (any (`isInfixOf` e) limit_errors) ->
+      either (\r -> Left (e ++ " (and the repair: " ++ r ++ ")")) Right repaired
+    Left e -> Left e
+  where
+    prefix_error = either (Left . ("PDF: " ++)) Right
+
+-- | The errors of the limits of the reader: such a file is not repaired.
+-- See Note [Repair of a file]
+limit_errors :: [String]
+limit_errors =
+  [ too_many_entries, "a cross-reference stream is too large"
+  , "a stream is larger than the limit" -- Graphics.PDF.File.Filter
+  , "the value is nested too deep" ] -- Graphics.PDF.File.Lexer
+
+too_many_entries :: String
+too_many_entries = "the file has too many cross-reference entries"
+
+-- | The structure that the cross-reference sections give is correct: the
+-- trailer has a /Root, each offset is the one of its object ("n g obj"),
+-- and each object of an object stream has the entry of an object stream
+-- of the file. See Note [Repair of a file]
+check_structure :: S.ByteString -> M.Map Int Entry -> [Dict] -> Either String ()
+check_structure bytes entries trailers = do
+  unless (any (\t -> case dictLookup (C.pack "Root") t of
+                      Just (Ref _ _) -> True
+                      _ -> False) trailers) $
+    Left "the trailer has no /Root"
+  forM_ (M.toList entries) $ \(n, e) -> case e of
+    InFile off g -> case runParser header bytes off of
+      Right ((n', g'), _) | n' == fromIntegral n && g' == fromIntegral g -> Right ()
+      _ -> Left ("the object at the offset " ++ show off ++ " is not the object " ++ show n ++ " " ++ show g)
+    InStream c _ -> case M.lookup c entries of
+      Just (InFile _ _) -> Right ()
+      _ -> Left ("the object " ++ show c ++ " is not an object stream of the file")
+    Free -> Right ()
+  where
+    header = do
+      n <- integerToken
+      g <- integerToken
+      keyword "obj"
+      return (n, g)
+
+-- | Where the entries of a file come from: the cross-reference sections
+-- (the offset of the newest one, as the file gives it, the base of the
+-- offsets, and a section that is a stream), or a scan of the file (the
+-- object streams that it found). See Note [Repair of a file]
+data Origin = Sections !Integer !Int !Bool | Repaired ![(Int, Int)]
+
+-- | The file of the entries and of the trailers (the newest first)
+source_of :: Limits -> T.Text -> S.ByteString -> (Int, Int) -> Origin -> M.Map Int Entry -> [Dict] -> Budget
+          -> Either String PdfSource
+source_of limits password bytes version origin entries0 trailers budget = do
   let trailer = foldr (M.unionWith (\newer _ -> newer)) M.empty trailers
-  case dictLookup (C.pack "Root") trailer of
-    Just (Ref _ _) -> Right ()
-    _ -> Left "the trailer has no /Root"
+      has_root t = case dictLookup (C.pack "Root") t of
+        Just (Ref _ _) -> True
+        _ -> False
+      repaired = case origin of
+        Repaired _ -> True
+        Sections {} -> False
+  -- a repaired file can have its catalog in an object stream: see Note
+  -- [Repair of a file]
+  unless (has_root trailer || repaired) $ Left "the trailer has no /Root"
   decryption <- case dictLookup (C.pack "Encrypt") trailer of
     Nothing -> Right Nothing
     Just e -> do
-      (number, d) <- encryption_dict entries e
+      (number, d) <- encryption_dict e
       case dictLookup (C.pack "Root") trailer of
         Just (Ref r _) | Just r == number -> Left "the /Encrypt of the trailer is the catalog"
         _ -> Right ()
@@ -162,44 +242,235 @@ parsePdfSource limits password bytes = prefix_error $ do
           no_password = if T.null password then (++ " (no password was given)") else id
       dec <- either (Left . no_password) Right (openEncryption d file_id password)
       Right (Just (dec, number, e))
+  (entries, budget') <- case origin of
+    Repaired containers -> with_object_streams limits bytes budget ((\(dec, _, _) -> dec) <$> decryption) containers entries0
+    Sections {} -> Right (entries0, budget)
   objects <- load_objects limits bytes budget' entries ((\(dec, n, _) -> (dec, n)) <$> decryption)
+  root <- case dictLookup (C.pack "Root") trailer of
+    Just r@(Ref _ _) -> Right r
+    _ -> case [ Ref n g | (n, (g, Plain (Dict d))) <- IM.toDescList objects
+                        , dictLookup (C.pack "Type") d == Just (Name (C.pack "Catalog")) ] of
+      r : _ -> Right r
+      [] -> Left "the trailer has no /Root, and the file has no catalog"
   let encryption_object n = maybe False (\(_, number, _) -> number == Just n) decryption
       file = PdfFile
         { pdfVersion = version
-        , pdfTrailer = foldr M.delete trailer (map C.pack ("Encrypt" : xref_keys))
+        , pdfTrailer = M.insert (C.pack "Root") root (foldr M.delete trailer (map C.pack ("Encrypt" : xref_keys)))
         , pdfObjects = IM.filterWithKey (\n (_, o) -> not (removed o || encryption_object n)) objects
         , pdfPermissions = decryption >>= \(dec, _, _) -> decryptorPermissions dec
         }
-  -- the section that "startxref" gives was read: its offset is in the file
-  (is_table, _) <- runParser (optionalKeyword "xref") bytes (fromInteger start + base)
+      (start, base, stream) = case origin of
+        Sections st b x -> (st, b, x)
+        Repaired _ -> (0, 0, False)
   Right PdfSource
     { sourceFile = file
     , sourceBytes = bytes
     , sourceStartXref = start
     , sourceBase = base
-    , sourceXrefStream = not is_table
+    , sourceXrefStream = stream
     -- the /Size of the trailer can be larger than the numbers of the
     -- file: a new object would get a number that readers refuse
     , sourceSize = maybe 1 ((+ 1) . fst) (M.lookupMax entries)
     , sourceEncryption = (\(dec, _, e) -> (dec, e)) <$> decryption
+    , sourceRepaired = repaired
     }
   where
-    prefix_error = either (Left . ("PDF: " ++)) Right
     xref_keys = ["Size", "Prev", "XRefStm", "Type", "W", "Index", "Length", "Filter", "DecodeParms", "DL"]
     -- the /Encrypt dictionary: direct, or an object of the file that is not
     -- encrypted. See Note [Objects that are not encrypted] in Graphics.PDF.File.Crypt
     --
     -- The reader removes the /Encrypt object: it must not be an object of
     -- the document (the catalog, a page). It has no /Type, or /Type /Encrypt
-    encryption_dict entries e = case e of
+    encryption_dict e = case e of
       Dict d -> Right (Nothing, d)
-      Ref n g | Just (InFile off g') <- M.lookup n entries, g == g' -> do
+      Ref n g | Just (InFile off g') <- M.lookup n entries0, g == g' -> do
         (n', g'', object) <- read_object limits bytes (S.length bytes) (const Nothing) off
         case object of
           Plain (Dict d) | n' == n && g'' == g
                          , dictLookup (C.pack "Type") d `elem` [Nothing, Just (Name (C.pack "Encrypt"))] -> Right (Just n, d)
           _ -> Left "the /Encrypt of the trailer is not an encryption dictionary"
       _ -> Left "the /Encrypt of the trailer is not correct"
+
+-- Note [Repair of a file]
+-- ~~~~~~~~~~~~~~~~~~~~~~~
+-- When the structure of a file is not correct, the reader finds the
+-- objects with a scan of the file, as poppler and qpdf do ('limitRepair'):
+-- no "startxref", cross-reference sections that cannot be read, no /Root,
+-- an offset that is not the one of its object ("n g obj"), or an object
+-- of an object stream that is not in the file ('check_structure'). An
+-- error of the limits, of a value of an object (the newest version of an
+-- object is not correct: the repair would give an older one), of a
+-- stream or of the decryption is not repaired.
+--
+--
+-- * each "n g obj" is an object. The scan reads it, and goes on after it:
+--   the data of a stream ("5 0 obj" in a content stream) gives no object.
+--   A /Length that is a reference is read in the objects "n g obj
+--   <integer> endobj" of the file. The data of a stream with no correct
+--   /Length ends at the next
+--   "endstream", and the value of an object or of a trailer ends at the
+--   next "n g obj" (or the next "trailer"): the scan reads each byte one
+--   time, also in a file made to be read many times. A value with "n g
+--   obj" in a string is thus lost. For a number that comes again, the object that is the last in the
+--   file wins: an update comes after the file;
+-- * the trailers are the "trailer" dictionaries outside of the objects,
+--   and the cross-reference streams. The trailer that is the last in the
+--   file wins. With no /Root, the /Type /Catalog of the largest number
+--   is the root, also in an object stream;
+-- * the objects of the object streams are objects of the file, when the
+--   object stream comes after the object with the same number. Their
+--   numbers are read after the key of an encrypted file is known: an
+--   object stream is encrypted. The decoded data and the entries count in
+--   the limits of the reader;
+-- * the error of a file that the scan cannot read is the error of its
+--   cross-reference sections, then the error of the scan.
+--
+-- The repair does not change the objects: a reference to an object that
+-- the file lost (a truncated file) is null, also in the /Kids of the
+-- pages (qpdf removes such pages). An object that an update deleted
+-- comes back. 'sourceRepaired' tells it:
+-- an incremental update of a repaired file is not possible, as its
+-- /Prev would give a section that is not correct.
+
+-- | What the scan of a file finds. See Note [Repair of a file]
+data Scan = Scan
+  { scan_entries :: !(M.Map Int Entry)
+  , scan_trailers :: ![Dict] -- ^ The newest first
+  , scan_containers :: ![(Int, Int)] -- ^ The object streams: their numbers and their offsets, in the order of the file
+  , scan_budget :: !Budget
+  }
+
+-- | The objects and the trailers of a file, from a scan of the file.
+-- See Note [Repair of a file]
+scan_file :: Limits -> S.ByteString -> Budget -> Either String Scan
+scan_file limits bytes budget0 = do
+  (entries, spans, xref_dicts, containers, budget) <- go 0 M.empty IM.empty [] [] budget0
+  let -- a "trailer" in the data of an object is not a trailer
+      outside p = case IM.lookupLE p spans of
+        Just (_, e) -> p >= e
+        Nothing -> True
+      trailer_starts = occurrences (C.pack "trailer") 0
+      -- a trailer ends before the next trailer and the next object
+      next_object p = maybe (S.length bytes) fst (IS.minView (snd (IS.split p candidates)))
+      trailers = [ (p, d) | (p, next) <- zip trailer_starts (drop 1 trailer_starts ++ [S.length bytes]), outside p
+                          , Right (Dict d, _) <- [runParser (keyword "trailer" >> valueWith (limitDepth limits))
+                                                            (S.take (min next (next_object p)) bytes) p] ]
+      newest_first = map snd (reverse (merge_by_offset trailers (reverse xref_dicts)))
+      -- the object streams whose entries are the scanned ones (the last
+      -- object with their numbers)
+      latest = [ (c, off) | (c, off) <- containers, Just (InFile o _) <- [M.lookup c entries], o == off ]
+  when (M.null entries) $ Left "the file has no object"
+  Right (Scan entries newest_first latest budget)
+  where
+    -- the search of "endstream" of a stream with no correct /Length stops
+    -- at the next "endstream" of the file: the scan stays linear, also
+    -- with many streams that have no "endstream"
+    endstreams = IS.fromList (occurrences (C.pack "endstream") 0)
+    stream_bound s = maybe s (+ 9) (IS.lookupGE s endstreams)
+    -- the starts of the "n g obj" of the file: the value of an object
+    -- ends at the next one, thus each byte is read one time at most, also
+    -- for objects that cannot be read
+    candidates = IS.fromList [ s | p <- occurrences (C.pack "obj") 0, Just s <- [object_start p] ]
+    value_end s = maybe (S.length bytes) id (IS.lookupGT s candidates)
+    -- the objects that are an integer: the /Length of a stream can be a
+    -- reference to one, also after the stream. The last one wins
+    lengths = IM.fromList [ (fromInteger n, v) | s <- IS.toAscList candidates
+                                               , Right ((n, v), _) <- [runParser integer_only (S.take (value_end s) bytes) s]
+                                               , n >= 1, n < 2 ^ (31 :: Int), v >= 0 ]
+    integer_only = do
+      n <- integerToken
+      _ <- integerToken
+      keyword "obj"
+      v <- integerToken
+      keyword "endobj"
+      return (n, v)
+    -- the offsets of a pattern, from an offset
+    occurrences pat from = case S.breakSubstring pat (S.drop from bytes) of
+      (before, rest) | S.null rest -> []
+                     | otherwise -> let p = from + S.length before in p : occurrences pat (p + 1)
+    merge_by_offset xs [] = xs
+    merge_by_offset [] ys = ys
+    merge_by_offset (x : xs) (y : ys)
+      | fst x <= fst y = x : merge_by_offset xs (y : ys)
+      | otherwise = y : merge_by_offset (x : xs) ys
+    -- the objects, from an offset; the spans of the objects; the
+    -- dictionaries of the cross-reference streams (the last first); the
+    -- object streams
+    go pos entries spans xrefs containers budget =
+      case S.breakSubstring (C.pack "obj") (S.drop pos bytes) of
+        (before, rest) | S.null rest -> Right (entries, spans, xrefs, reverse containers, budget)
+                       | otherwise ->
+          let p = pos + S.length before
+          in case object_start p of
+               Nothing -> go (p + 3) entries spans xrefs containers budget
+               Just s -> case read_object_end limits bytes (value_end s) (stream_bound s) (`IM.lookup` lengths) s of
+                 Right (n, g, o, end) | end > p -> do
+                   budget' <- use_entries 1 budget
+                   let is_type t d = dictLookup (C.pack "Type") d == Just (Name (C.pack t))
+                       xrefs' = case o of
+                         Stream d _ | is_type "XRef" d -> (s, d) : xrefs
+                         _ -> xrefs
+                       containers' = case o of
+                         Stream d _ | is_type "ObjStm" d -> (n, s) : containers
+                         _ -> containers
+                   go end (M.insert n (InFile s g) entries) (IM.insert s end spans) xrefs' containers' budget'
+                 _ -> go (p + 3) entries spans xrefs containers budget
+    -- "n g obj": the offset of n, from the offset of "obj". The reading
+    -- of the object checks the keyword "obj"
+    object_start p = do
+      a <- spaces_before (p - 1)
+      (g_start, _) <- digits_before a 5
+      b <- spaces_before (g_start - 1)
+      (n_start, _) <- digits_before b 10
+      if n_start == 0 || not (regular (n_start - 1)) then Just n_start else Nothing
+    -- the last offset of spaces that end at an offset, and one at least
+    spaces_before i
+      | i >= 0 && is_space (SU.unsafeIndex bytes i) =
+          let j = last (takeWhile (\k -> k >= 0 && is_space (SU.unsafeIndex bytes k)) [i, i - 1 .. max 0 (i - 64)])
+          in Just (j - 1)
+      | otherwise = Nothing
+    -- the first offset of the digits that end at an offset, with a number of digits
+    digits_before i most =
+      let ds = takeWhile (\k -> k >= 0 && is_digit (SU.unsafeIndex bytes k)) [i, i - 1 .. max 0 (i - most)]
+      in if null ds || length ds > most then Nothing else Just (last ds, length ds)
+    is_space w = w == 0x20 || w == 0x0A || w == 0x0D || w == 0x09 || w == 0x0C || w == 0x00
+    is_digit w = w >= 0x30 && w <= 0x39
+    -- a byte of a name or a number, before "n"
+    regular i = i >= 0 && i < S.length bytes &&
+      let w = SU.unsafeIndex bytes i in not (is_space w) && w `S.notElem` C.pack "()<>[]{}/%"
+
+-- | The entries of the objects of the object streams that a scan found:
+-- the object stream must come after the object with the same number.
+-- An object stream that cannot be read gives no object, but a limit of
+-- the reader gives 'Left': the file would have older objects.
+-- See Note [Repair of a file]
+with_object_streams :: Limits -> S.ByteString -> Budget -> Maybe Decryptor -> [(Int, Int)] -> M.Map Int Entry
+                    -> Either String (M.Map Int Entry, Budget)
+with_object_streams limits bytes budget0 decryption containers entries0 = foldM add (entries0, budget0) containers
+  where
+    -- the decoded data and the entries count: see Note [Limits of the reader]
+    add (entries, budget) (c, off) = case read_object limits bytes (S.length bytes) (const Nothing) off of
+      -- the /N of the object stream, before its table: see Note [Limits of the reader]
+      Right (_, _, Stream d _) | Just (Integer n) <- dictLookup (C.pack "N") d
+                               , n > fromIntegral (budgetEntries budget) -> Left too_many_entries
+      Right (_, g, o) | Right o' <- maybe (Right o) (\dec -> decryptObject dec c g o) decryption ->
+        case objectStreamNumbers (stream_limit limits budget) c o' of
+          Right (numbers, size) -> do
+            let new = [ (n, i) | (n, i) <- numbers, older n off entries ]
+            budget' <- use_entries (length new) (use_bytes size budget)
+            Right (foldl (\es (n, i) -> M.insert n (InStream c i) es) entries new, budget')
+          -- an object stream that a limit stops would give older objects
+          Left e | any (`isInfixOf` e) limit_errors -> Left e
+          Left _ -> Right (entries, budget)
+      _ -> Right (entries, budget)
+    -- the entry of a number is older than an offset
+    older n off es = case M.lookup n es of
+      Nothing -> True
+      Just (InFile o _) -> o < off
+      Just (InStream c _) -> case M.lookup c es of
+        Just (InFile o _) -> o < off
+        _ -> True
+      Just Free -> True
 
 -- Note [Objects that the reader removes]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -472,7 +743,15 @@ read_xref_stream limits bytes base budget offset = do
 -- See Note [Length of a stream]
 read_object :: Limits -> S.ByteString -> Int -> (Int -> Maybe Integer) -> Int
             -> Either String (Int, Int, Object)
-read_object limits bytes bound length_of offset = do
+read_object limits bytes bound length_of offset =
+  (\(n, g, o, _) -> (n, g, o)) <$> read_object_end limits bytes (S.length bytes) bound length_of offset
+
+-- | 'read_object', and the offset after the value or after "endstream".
+-- The first offset is the end of the value: the scan of a file reads a
+-- value only to the next object. See Note [Repair of a file]
+read_object_end :: Limits -> S.ByteString -> Int -> Int -> (Int -> Maybe Integer) -> Int
+                -> Either String (Int, Int, Object, Int)
+read_object_end limits bytes value_end bound length_of offset = do
   let header = do
         n <- integerToken
         g <- integerToken
@@ -480,13 +759,13 @@ read_object limits bytes bound length_of offset = do
         v <- valueWith (limitDepth limits)
         after <- getPos
         return (n, g, v, after)
-  ((number, generation, v, after), _) <- runParser header bytes offset
+  ((number, generation, v, after), _) <- runParser header (S.take value_end bytes) offset
   unless (number >= 1 && number < 2 ^ (31 :: Int) && generation >= 0 && generation <= 65535) $
     Left ("the object at the offset " ++ show offset ++ " has a wrong number")
-  object <- case v of
+  (object, end) <- case v of
     Dict d -> do
       (is_stream, start) <- runParser (optionalKeyword "stream") bytes after
-      if not is_stream then Right (Plain v) else do
+      if not is_stream then Right (Plain v, after) else do
         let data_start = skip_eol (skip_spaces start)
             limit = max data_start (min bound (S.length bytes))
             from_length = case dictLookup (C.pack "Length") d of
@@ -497,16 +776,17 @@ read_object limits bytes bound length_of offset = do
               Just n | n >= 0 && n <= fromIntegral (S.length bytes - data_start)
                      , ends_with_endstream (data_start + fromInteger n) -> Just (fromInteger n)
               _ -> Nothing
-        content <- case checked of
-          Just n -> Right (S.take n (S.drop data_start bytes))
+        (content, data_end) <- case checked of
+          Just n -> Right (S.take n (S.drop data_start bytes), data_start + n)
           Nothing ->
             let window = S.take (limit - data_start) (S.drop data_start bytes)
                 (before, found) = S.breakSubstring (C.pack "endstream") window
             in if S.null found then Left ("the stream at the offset " ++ show offset ++ " has no endstream")
-               else Right (strip_eol before)
-        Right (Stream (M.insert (C.pack "Length") (Integer (fromIntegral (S.length content))) d) content)
-    _ -> Right (Plain v)
-  Right (fromInteger number, fromInteger generation, object)
+               else Right (strip_eol before, data_start + S.length before)
+        Right ( Stream (M.insert (C.pack "Length") (Integer (fromIntegral (S.length content))) d) content
+              , either (const data_end) snd (runParser (optionalKeyword "endstream") bytes data_end) )
+    _ -> Right (Plain v, after)
+  Right (fromInteger number, fromInteger generation, object, end)
   where
     -- "stream" can have spaces before its end of line
     skip_spaces i = if byte i == Just 0x20 || byte i == Just 0x09 then skip_spaces (i + 1) else i

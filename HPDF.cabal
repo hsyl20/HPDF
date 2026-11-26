@@ -71,6 +71,7 @@ Test-Suite HPDF-Tests
                      Tests.PdfFile
                      Tests.Encryption
                      Tests.Update
+                     Tests.Repair
                      Tests.Signature
                      Tests.TrueType
                      Tests.Typesetting

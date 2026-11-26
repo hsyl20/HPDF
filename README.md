@@ -143,8 +143,9 @@ main = do
 The reader knows the cross-reference tables (with the updates of a file),
 the cross-reference streams and the object streams. It decrypts an
 encrypted file with its password (`F.readPdfFileWithPassword`): RC4,
-AES-128 and AES-256. `HPDF-Rewrite-Demo` (Test/rewrite.hs) reads a file
-and writes it again.
+AES-128 and AES-256. A file whose cross-reference is not correct is
+repaired: the reader finds the objects with a scan of the file.
+`HPDF-Rewrite-Demo` (Test/rewrite.hs) reads a file and writes it again.
 
 `F.updatePdfFile` writes an incremental update: the bytes of the file,
 then only the objects that changed and a new cross-reference section.

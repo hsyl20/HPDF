@@ -16,6 +16,7 @@ import qualified Tests.Signature
 import qualified Tests.PdfFile
 import qualified Tests.Encryption
 import qualified Tests.Update
+import qualified Tests.Repair
 
 main :: IO ()
 main = defaultMain $ testGroup "HPDF"
@@ -32,4 +33,5 @@ main = defaultMain $ testGroup "HPDF"
   , Tests.PdfFile.tests
   , Tests.Encryption.tests
   , Tests.Update.tests
+  , Tests.Repair.tests
   ]

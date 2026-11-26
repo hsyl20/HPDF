@@ -17,8 +17,8 @@
 -- ('parsePdfFileWithPassword'), and records the permissions of the file
 -- ('pdfPermissions'): it does not apply them, and the writer writes a
 -- file that is not encrypted. 'encryptPdfFile' encrypts a file with
--- AES-256. The reader does not repair a file whose cross-reference is
--- not correct. The writer gives
+-- AES-256. The reader repairs a file whose cross-reference is not
+-- correct, with a scan of the file ('limitRepair'). The writer gives
 -- a file with one cross-reference table. A file is the objects of the
 -- document, as values ('PdfFile'): the structure of the file (object
 -- streams, cross-reference streams, linearization) is not kept.
@@ -55,6 +55,7 @@ module Graphics.PDF.File
     -- * Incremental updates
   , PdfSource
   , sourceFile
+  , sourceRepaired
   , readPdfSource
   , parsePdfSource
   , updatePdfFile
