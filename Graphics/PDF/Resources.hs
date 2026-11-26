@@ -87,11 +87,18 @@ data PDFColoredPattern
 data AnyPdfPattern
 
 
--- | A PDF Color space
-data PDFColorSpace = PatternRGB  deriving(Eq,Ord)
+-- | A PDF Color space: the colour space of an uncoloured pattern, which
+-- is the Pattern space with the device colour space of the colour that
+-- paints the pattern
+data PDFColorSpace = PatternRGB | PatternGray | PatternCMYK deriving(Eq,Ord)
 
 instance PdfResourceObject PDFColorSpace where
-    toRsrc PatternRGB = AnyPdfObject . map AnyPdfObject $ [PDFName "Pattern",PDFName "DeviceRGB"]
+    toRsrc space = AnyPdfObject . map AnyPdfObject $ [PDFName "Pattern",PDFName device]
+      where
+        device = case space of
+          PatternRGB -> "DeviceRGB"
+          PatternGray -> "DeviceGray"
+          PatternCMYK -> "DeviceCMYK"
     
 instance PdfObject PDFColoredPattern where
     toPDF _ = noPdfObject

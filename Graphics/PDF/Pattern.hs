@@ -123,48 +123,42 @@ setColoredStrokePattern ref = do
   
   
 
--- | Set the fill pattern
+-- | Set the fill pattern. The pattern is painted with the colour, in the
+-- device colour space of the colour.
 setUncoloredFillPattern :: PDFReference PDFUncoloredPattern -> Color -> Draw ()
-setUncoloredFillPattern ref col = do
-       let (r,g,b) = getRgbColor col
-       colorMap <- gets colorSpaces
-       (newColorName,_) <- setResource "ColorSpace" PatternRGB colorMap
-       newName <- registerPattern ref
-       tell . mconcat $ [ serialize "\n/"
-                        , serialize newColorName
-                        , serialize " cs"
-                        ]
-       tell . mconcat $ [ serialize '\n'
-                        , toPDF r
-                        , serialize ' '
-                        , toPDF g
-                        , serialize ' '
-                        , toPDF b
-                        , serialize ' '
-                        , serialize " /"
-                        , serialize newName
-                        , serialize " scn"
-                        ]
+setUncoloredFillPattern = set_uncoloured_pattern " cs" " scn"
 
--- | Set the stroke pattern
+-- | Set the stroke pattern. The pattern is painted with the colour, in the
+-- device colour space of the colour.
 setUncoloredStrokePattern :: PDFReference PDFUncoloredPattern -> Color -> Draw ()
-setUncoloredStrokePattern ref col = do
-    let (r,g,b) = getRgbColor col
+setUncoloredStrokePattern = set_uncoloured_pattern " CS" " SCN"
+
+-- | Select the colour space of an uncoloured pattern, then the colour and
+-- the pattern:
+--
+-- > /Oa cs                 the space [/Pattern /DeviceCMYK]
+-- > 0 1 1 0  /Ob scn       the colour and the pattern
+--
+-- See Note [Device colours] in Graphics.PDF.Draw
+set_uncoloured_pattern :: String -- ^ Operator that selects the colour space
+                       -> String -- ^ Operator that selects the colour and the pattern
+                       -> PDFReference PDFUncoloredPattern
+                       -> Color
+                       -> Draw ()
+set_uncoloured_pattern space_operator colour_operator ref col = do
+    let (space, components) = case col of
+          Gray g -> (PatternGray, [g])
+          Cmyk c m y k -> (PatternCMYK, [c, m, y, k])
+          _ -> let (r, g, b) = getRgbColor col in (PatternRGB, [r, g, b])
     colorMap <- gets colorSpaces
-    (newColorName,_) <- setResource "ColorSpace" PatternRGB colorMap
+    (newColorName,_) <- setResource "ColorSpace" space colorMap
     newName <- registerPattern ref
-    tell . mconcat $ [ serialize "\n/" 
+    tell . mconcat $ [ serialize "\n/"
                      , serialize newColorName
-                     , serialize " CS"
+                     , serialize space_operator
                      ]
-    tell . mconcat $   [ serialize '\n'
-                       , toPDF r
-                       , serialize ' '
-                       , toPDF g
-                       , serialize ' '
-                       , toPDF b
-                       , serialize ' '
-                       , serialize " /"
-                       , serialize newName
-                       , serialize " SCN"
-                       ]
+    tell . mconcat $ serialize '\n' : concatMap (\x -> [toPDF x, serialize ' ']) components
+                     ++ [ serialize " /"
+                        , serialize newName
+                        , serialize colour_operator
+                        ]

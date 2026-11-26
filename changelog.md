@@ -126,8 +126,10 @@
      not a PDF number. The library now depends on `directory`.
    * Gray and CMYK colours: `Color` has two new constructors, `Gray` and
      `Cmyk`. `fillColor` and `strokeColor` write them with the operators of
-     DeviceGray and DeviceCMYK. Code that matches on all the constructors
-     of `Color` must add the two cases.
+     DeviceGray and DeviceCMYK. `setUncoloredFillPattern` and
+     `setUncoloredStrokePattern` paint a pattern in the device colour
+     space of the colour. Code that matches on all the constructors of
+     `Color` must add the two cases.
    * PDF/A: the output intent can be a CMYK or a gray ICC profile, and no
      longer only an RGB profile. The profile decides the device colours
      that the document can use: RGB colours and images with an RGB
