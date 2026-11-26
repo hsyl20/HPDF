@@ -8,6 +8,7 @@
 ---------------------------------------------------------
 module Graphics.PDF.LowLevel.Signature
   ( signatureValue
+  , signatureKeys
   , setByteRange
   , findSignature
   , writeSignature
@@ -63,16 +64,39 @@ signatureValue :: String -- ^ Value of /SubFilter, without the "/"
                -> Builder
 signatureValue subfilter size others = mconcat
     [ lazy (C.pack ("<<\n/Type /Sig\n/Filter /Adobe.PPKLite\n/SubFilter /" ++ subfilter ++ "\n"))
-    , lazy byte_range_key
-    , lazy (pad_byte_range "[0 0 0 0]")
-    , lazy contents_key
-    , lazy (C.replicate (2 * fromIntegral (max 1 size)) '0')
-    , lazy (C.pack ">\n")
+    , lazy (signatureKeys Nothing (max 1 size))
+    , lazy (C.pack "\n")
     , others
     , lazy (C.pack ">>")
     ]
   where
     lazy = fromLazyByteString
+
+-- | The /ByteRange and the /Contents of a signature dictionary that is not
+-- signed, with a given number of bytes for the signature. With the offset
+-- of these bytes in the file and the length of the file, the byte range
+-- is the final one; else it is [0 0 0 0] ('setByteRange' writes it later,
+-- and finds the keys only in the first 200 bytes of the object). The
+-- length of the result does not depend on the byte range.
+-- See Note [Layout of a signature dictionary]
+signatureKeys :: Maybe (Int64, Int64) -> Int -> B.ByteString
+signatureKeys at size = B.concat
+    [ byte_range_key
+    , range
+    , contents_key
+    , C.replicate (2 * fromIntegral size) '0'
+    , C.pack ">"
+    ]
+  where
+    placeholder = pad_byte_range "[0 0 0 0]"
+    range = case at of
+      Nothing -> placeholder
+      Just (offset, total) ->
+        -- the offsets of the "<" and after the ">" of /Contents
+        let a = offset + B.length byte_range_key + byte_range_width + B.length contents_key - 1
+            b = a + 2 * fromIntegral size + 2
+            text = pad_byte_range (concat ["[0 ", show a, " ", show b, " ", show (total - b), "]"])
+        in if B.length text == byte_range_width then text else placeholder
 
 -- | Write the byte range of the signature dictionary that starts at the
 -- given offset of the document. The document is not changed if it has no
