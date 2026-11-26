@@ -191,6 +191,7 @@ library
      Graphics.PDF.Documentation
      Graphics.PDF.Archive
      Graphics.PDF.Signature
+     Graphics.PDF.Encryption
      Graphics.PDF.File
   Other-Modules:
      Graphics.PDF.LowLevel.Types
@@ -205,6 +206,7 @@ library
      Graphics.PDF.File.Permissions
      Graphics.PDF.File.Cipher
      Graphics.PDF.File.Crypt
+     Graphics.PDF.File.Encrypt
      Graphics.PDF.LowLevel.PNG
      Graphics.PDF.LowLevel.Signature
      Graphics.PDF.LowLevel.CMS

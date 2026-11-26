@@ -6,9 +6,12 @@
 --
 -- > cabal run HPDF-Sign-Demo -- key.pem certificates.pem
 --
--- Writes signed.pdf. The two files are in PEM: a private key that is not
--- encrypted (RSA, or EC on a named curve), and its certificate followed by
--- the other certificates of its chain. For a test:
+-- Writes signed.pdf, and encrypted-signed.pdf: the same document,
+-- encrypted (AES-256, the user password "user" and the owner password
+-- "owner", printing only), then signed. The two files are in PEM: a
+-- private key that is not encrypted (RSA, or EC on a named curve), and
+-- its certificate followed by the other certificates of its chain. For a
+-- test:
 --
 -- > openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem \\
 -- >   -out certificates.pem -days 30 -subj "/CN=Test"
@@ -16,6 +19,7 @@
 module Main where
 
 import Graphics.PDF
+import Graphics.PDF.Encryption
 import Graphics.PDF.Signature
 import qualified Data.ByteString.Lazy as BL
 import System.Environment (getArgs)
@@ -39,3 +43,8 @@ main = do
   -- The signature of all the bytes of the document
   signPdfWith signer unsigned >>= either die (BL.writeFile "signed.pdf")
   putStrLn "signed.pdf written"
+  -- The encryption, then the signature of the encrypted bytes
+  let enc = (encryption "user" "owner") { encPermissions = noPermissions { permPrint = True, permPrintHighQuality = True } }
+  encrypted <- encryptPdf enc unsigned >>= either die return
+  signPdfWith signer encrypted >>= either die (BL.writeFile "encrypted-signed.pdf")
+  putStrLn "encrypted-signed.pdf written"
