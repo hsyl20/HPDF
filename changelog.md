@@ -181,6 +181,10 @@
      changes, unless `updatePdfFileWith` ignores them (`UpdateOptions`).
      `pdfPages` gives the pages of a file, and `isSignatureDict` tells a
      signature dictionary.
+   * A second signature: `addSignatureField` adds a signature field to a
+     page of a file that was read, then `updatePdfFile` and `signPdfWith` sign the
+     update. It also works for an encrypted and signed file.
+     `HPDF-Sign-Demo` also writes documents with two signatures.
 
 ## 1.8
 
