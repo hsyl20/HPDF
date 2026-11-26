@@ -25,6 +25,7 @@ extra-source-files:
   Test/unicode.hs
   Test/pdfa.hs
   Test/sign.hs
+  Test/rewrite.hs
   README.md
   changelog.md
   Core14_AFMs/Courier-Bold.afm
@@ -63,6 +64,7 @@ Test-Suite HPDF-Tests
                      Tests.Image
                      Tests.Numbers
                      Tests.PDFA
+                     Tests.PdfFile
                      Tests.Signature
                      Tests.TrueType
                      Tests.Typesetting
@@ -103,6 +105,14 @@ Executable HPDF-Unicode-Demo
                      HPDF,
                      text >= 1.2.0,
                      directory
+  Default-language:  Haskell2010
+
+Executable HPDF-Rewrite-Demo
+  Main-is:           rewrite.hs
+  hs-source-dirs:    Test
+  Build-depends:     base >= 4,
+                     HPDF,
+                     containers
   Default-language:  Haskell2010
 
 Executable HPDF-Sign-Demo
@@ -176,10 +186,17 @@ library
      Graphics.PDF.Documentation
      Graphics.PDF.Archive
      Graphics.PDF.Signature
+     Graphics.PDF.File
   Other-Modules:
      Graphics.PDF.LowLevel.Types
      Graphics.PDF.LowLevel.Hash
      Graphics.PDF.LowLevel.Inflate
+     Graphics.PDF.File.Object
+     Graphics.PDF.File.Lexer
+     Graphics.PDF.File.Filter
+     Graphics.PDF.File.Write
+     Graphics.PDF.File.Parse
+     Graphics.PDF.File.ObjectStream
      Graphics.PDF.LowLevel.PNG
      Graphics.PDF.LowLevel.Signature
      Graphics.PDF.LowLevel.CMS
