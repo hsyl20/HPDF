@@ -150,6 +150,12 @@ test_afmMalformed = do
   -- a global key with a value that is not a number is ignored
   accepted (replace "CapHeight 700" "CapHeight 7,5" type1_afm)
   accepted type1_afm
+  -- CVE-2018-8036 (PDFBox): an AFM file that made the parser loop and
+  -- use all the memory. The parser reads the lines one time, and does
+  -- not use the counts of the file
+  accepted (replace "StartCharMetrics 2" "StartCharMetrics 2000000000" type1_afm)
+  accepted (replace "EndCharMetrics\nEndFontMetrics\n" "" type1_afm)
+  rejected (replace "C 33 ; WX 600 ; N alpha ; B 0 0 600 700 ;\nC 34 ; WX 700 ; N beta ; B 0 0 700 700 ;\n" "" type1_afm)
 
 -- The font dictionary of a standard font is one object, and each page
 -- refers to it.

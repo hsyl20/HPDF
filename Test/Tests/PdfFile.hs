@@ -44,6 +44,7 @@ tests = testGroup "PdfFile"
   , test "objectStreamOffsets" test_objectStreamOffsets
   , test "unusualFiles" test_unusualFiles
   , test "valuesAndObjects" test_valuesAndObjects
+  , localOption (mkTimeout 10000000) (test "knownAttacks" test_knownAttacks)
   ]
 
 value :: BS.ByteString -> Either String F.Value
@@ -738,3 +739,76 @@ test_hpdfDocuments = withTestFont $ \_ ttf -> do
                                , Right d <- [F.decodeStream 1000000 dict raw] ]
             assertBoolVerbose name (any (\d -> " re" `BS.isInfixOf` d || " l" `BS.isInfixOf` d || "Tf" `BS.isInfixOf` d || " Do" `BS.isInfixOf` d) contents))
         documents
+
+-- The attacks of known CVEs of other PDF readers. Each file must give
+-- Left, or the correct objects, in a short time (the test has a timeout).
+test_knownAttacks :: IO ()
+test_knownAttacks = do
+  let classic = classicFile " \n" documentObjects ""
+      stream_file = xrefStreamFile defaultX
+      -- the reason of the refusal has these words
+      refusedFor words_ name bytes = case F.parsePdfFile bytes of
+        Left e -> assertBoolVerbose (name ++ ": " ++ e) (all (`elem` words e) words_)
+        Right _ -> assertFailure (name ++ ": the file was read")
+  -- CVE-2018-7174 (xpdf), CVE-2026-27628 (pypdf): a /Prev loop. The
+  -- reader of xpdf checked the loops of the tables, but not of the
+  -- cross-reference streams
+  let start = previousStart stream_file
+  refusedFor ["loop"] "/Prev loop of a cross-reference stream"
+          (replaceOnce "/Root 1 0 R  /Length" (C.pack ("/Root 1 0 R /Prev " ++ show start ++ " /Length")) stream_file)
+  refusedFor ["loop"] "/Prev loop of a table"
+          (let u = withUpdate classic [] [] in replaceOnce (C.pack ("/Prev " ++ show (previousStart classic)))
+                                                           (C.pack ("/Prev " ++ show (previousStart u))) u)
+  -- CVE-2026-119203 (pypdf): a cross-reference table with no trailer
+  refusedFor ["integer"] "a table with no trailer" (replaceOnce "trailer\n" "" classic)
+  -- CVE-2017-15587 and CVE-2017-17858 (MuPDF): the numbers of a
+  -- subsection overflow
+  mapM_ (\header -> refusedFor ["subsection"] (C.unpack header) (replaceOnce "trailer" (header <> "0000000009 00000 n \ntrailer") classic))
+    ["2147483647 2\n", "4294967296 1\n", "-1 1\n", "18446744073709551616 1\n", "5 -1\n"]
+  -- CVE-2018-6544 (MuPDF): an object stream that refers to itself, or to
+  -- an object stream
+  refusedFor ["stream"] "an object stream in itself" (replaceOnce "/Type /ObjStm" "/Type /ObjStm /Extends 5 0 R" stream_file `seq`
+                                        objectStreamLoop)
+  -- CVE-2017-9209 (qpdf): values nested so deep that the stack is
+  -- exhausted
+  let nested value = classicFile " \n" (take 3 documentObjects ++ [(4, 0, value)]) ""
+  refusedFor ["deep"] "nested arrays" (nested (C.replicate 100000 '['))
+  refusedFor ["deep"] "nested dictionaries" (nested (BS.concat (replicate 100000 "<< /A ")))
+  -- CVE-2025-55197 (pypdf): FlateDecode filters one after the other on a
+  -- cross-reference stream, a decompression bomb
+  refusedFor ["supported"] "two FlateDecode filters" (replaceOnce "/Filter /FlateDecode /DecodeParms" "/Filter [/FlateDecode /FlateDecode] /DecodeParms" stream_file)
+  -- CVE-2025-62708 (pypdf): an LZWDecode bomb. The reader does not decode
+  -- LZWDecode
+  refusedFor ["supported"] "LZWDecode" (replaceOnce "/Filter /FlateDecode /DecodeParms" "/Filter /LZWDecode /DecodeParms" stream_file)
+  -- CVE-2026-102997 (pypdf): a FlateDecode stream that is not correct,
+  -- and a long recovery. The reader does not recover: Left at once
+  let (before, after) = BS.breakSubstring "stream\n" (snd (BS.breakSubstring "/Type /XRef" stream_file))
+      at = BS.length stream_file - BS.length after + 7
+  assertBool (BS.length before > 0)
+  refusedFor ["expanded:"] "a FlateDecode stream that is not correct"
+          (BS.concat [BS.take at stream_file, "XX", BS.drop (at + 2) stream_file])
+  -- CVE-2023-36464 (pypdf): a comment with no end of line at the end of
+  -- the data made the parser loop
+  mapM_ (\t -> assertBoolVerbose (C.unpack t) (isLeft (F.parseValue t))) ["<< /A 1 % no end", "[1 2 %", "%", "( % )x"]
+  assertEqual (Right (F.Integer 1)) (F.parseValue "1 % a comment at the end")
+  refusedFor ["integer"] "a comment after startxref" (fst (BS.breakSubstring "startxref" classic) <> "startxref % no end")
+  -- CVE-2018-20481 (poppler): a reference to an object that is not in the
+  -- cross-reference
+  case F.parsePdfFile (replaceOnce "/Root 1 0 R" "/Root 99 0 R" classic) of
+    Left e -> assertFailure e
+    Right f -> do
+      assertEqual Nothing (F.getObject f 99)
+      assertEqual F.Null (F.resolveValue f (F.Ref 99 0))
+  where
+    -- the object 5 is an object stream whose entry says that it is in the
+    -- object stream 5
+    objectStreamLoop =
+      let header = "%PDF-1.5\n"
+          [(_, catalog), (_, pages), (_, page), (_, content)] = [ (n, b) | (n, _, b) <- documentObjects ]
+          objstm = objectStreamBody [(2, pages), (3, page)]
+          (body, offs) = layout (BS.length header) [(1, 0, catalog), (4, 0, content), (5, 0, objstm)]
+          start = BS.length header + BS.length body
+          entries = [ (0, XFree), (1, XFile (offsetOf 1 offs) 0), (2, XIn 5 0), (3, XIn 5 1)
+                    , (4, XFile (offsetOf 4 offs) 0), (5, XIn 5 2), (6, XFile start 0) ]
+          xref = BS.concat ["6 0 obj\n", xrefStreamBody defaultX 7 entries "", "\nendobj\n"]
+      in BS.concat [header, body, xref, "startxref\n", C.pack (show start), "\n%%EOF\n"]
