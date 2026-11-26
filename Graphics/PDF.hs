@@ -327,12 +327,18 @@ saveObjects  = do
     Just a -> do
       let profile = pdfaOutputProfile a
       -- See Note [Device colours in a PDF/A document]
-      case iccColorSpace profile of
-        Right "RGB " -> return ()
-        Right space -> problem ("PDF/A: the ICC profile of the output intent must be an RGB profile; its colour space is " ++ show space)
-        Left e -> problem ("PDF/A: the ICC profile of the output intent cannot be used: " ++ e)
-      liftPDF checkDeviceColours
-      icc <- createContent (iccStream profile) Nothing
+      -- See Note [Device colours in a PDF/A document]
+      components <- case iccColorSpace profile of
+        Right space | Just n <- lookup space [("RGB ", 3), ("CMYK", 4), ("GRAY", 1)] -> do
+          liftPDF (checkDeviceColours space)
+          return n
+        Right space -> do
+          problem ("PDF/A: the ICC profile of the output intent must be an RGB, CMYK or gray profile; its colour space is " ++ show space)
+          return 3
+        Left e -> do
+          problem ("PDF/A: the ICC profile of the output intent cannot be used: " ++ e)
+          return 3
+      icc <- createContent (iccStream components profile) Nothing
       intent <- addObject . dictFromList $
         [ entry "Type" (PDFName "OutputIntent")
         , entry "S" (PDFName "GTS_PDFA1")
@@ -404,8 +410,9 @@ saveObjects  = do
   return (cat, info)
  where
   problem p = modifyStrict $ \s -> s {documentProblems = documentProblems s ++ [p]}
-  iccStream profile = do
-    modifyStrict $ \s -> s {otherRsrcs = dictFromList [entry "N" (PDFInteger 3)]}
+  iccStream :: Int -> B.ByteString -> Draw ()
+  iccStream components profile = do
+    modifyStrict $ \s -> s {otherRsrcs = dictFromList [entry "N" (PDFInteger components)]}
     tell (fromLazyByteString profile)
 
 -- Note [Keys of the EmbeddedFiles name tree]
@@ -439,26 +446,55 @@ uniqueKeys = snd . mapAccumL pick Set.empty
 -- Note [Device colours in a PDF/A document]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 -- A PDF/A document can use a device colour space only when the output
--- intent can give its colours a meaning (ISO 19005-2, 6.2.4.3): DeviceRGB
--- needs an RGB profile, DeviceCMYK needs a CMYK profile, DeviceGray needs
--- any profile.
+-- intent can give its colours a meaning (ISO 19005-2, 6.2.4.3):
 --
--- HPDF accepts only an RGB profile for the output intent. A DeviceCMYK
--- image (a CMYK JPEG) and a CMYK colour ('Cmyk') are then problems. A gray
--- colour is permitted.
+--   profile of the output intent      device colour spaces that are permitted
+--   RGB                               DeviceRGB, DeviceGray
+--   CMYK                              DeviceCMYK, DeviceGray
+--   gray                              DeviceGray
+--
+-- The caller gives the profile ('Graphics.PDF.Archive.pdfaOutputProfile'),
+-- and HPDF reads its colour space in the header of the profile.
+--
+-- A stream uses a device colour space in two ways:
+--
+-- * with a colour operator ('Graphics.PDF.Colors.fillColor'): the stream
+--   records it, see Note [Device colours] in Graphics.PDF.Draw;
+-- * with a name in a dictionary: the colour space of an image, of a
+--   shading, of a pattern or of a transparency group. These dictionaries
+--   are the dictionary of the stream and its resources, and
+--   'checkDeviceColours' looks for the three names in their bytes.
+--
+-- A content with no colour operator paints in black with DeviceGray, which
+-- each profile permits.
 
--- | Records a problem when an image is DeviceCMYK, or when a stream has a
--- CMYK colour.
+-- | The device colour spaces that a stream uses.
 -- See Note [Device colours in a PDF/A document]
-checkDeviceColours :: PDF ()
-checkDeviceColours = do
-  ss <- gets (map (otherRsrcs . fst . snd) . IM.elems . streams)
-  let is_cmyk (PDFDictionary d) =
-        fmap (toLazyByteString . toPDF) (M.lookup (PDFName "ColorSpace") d) == Just (LC.pack "/DeviceCMYK")
-  cmyk <- gets (any (cmykColours . fst . snd) . IM.elems . streams)
+streamDeviceColours :: DrawState -> DeviceColours
+streamDeviceColours st = deviceColours st <> named (otherRsrcs st) <> named (rsrc st)
+  where
+    named :: PdfObject a => a -> DeviceColours
+    named dict =
+      let bytes = B.toStrict (toLazyByteString (toPDF dict))
+          uses space = S.isInfixOf (S.pack (map (fromIntegral . fromEnum) space)) bytes
+      in DeviceColours (uses "/DeviceGray") (uses "/DeviceRGB") (uses "/DeviceCMYK")
+
+-- | Records a problem for each device colour space that the document uses
+-- and that the profile of its output intent does not permit. The argument
+-- is the colour space of the profile: @"RGB "@, @"CMYK"@ or @"GRAY"@.
+--
+-- See Note [Device colours in a PDF/A document]
+checkDeviceColours :: String -> PDF ()
+checkDeviceColours space = do
+  used <- gets (mconcat . map (streamDeviceColours . fst . snd) . IM.elems . streams)
+  let intent = case space of
+        "RGB " -> "an RGB profile"
+        "CMYK" -> "a CMYK profile"
+        _ -> "a gray profile"
+      problem used_space = "PDF/A: the document uses " ++ used_space ++ " (a colour, an image or a shading); the output intent is " ++ intent
   modifyStrict $ \s -> s {documentProblems = documentProblems s ++
-    [ "PDF/A: an image is DeviceCMYK; the output intent is an RGB profile" | any is_cmyk ss ] ++
-    [ "PDF/A: a CMYK colour is used; the output intent is an RGB profile" | cmyk ]}
+    [ problem "DeviceRGB" | usesRgb used, space /= "RGB " ] ++
+    [ problem "DeviceCMYK" | usesCmyk used, space /= "CMYK" ]}
 
 -- | Records a problem for each font a stream uses whose program is not in
 -- the document (see 'fontEmbedded'): the document cannot be PDF/A.

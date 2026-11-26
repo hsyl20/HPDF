@@ -77,7 +77,9 @@ setFillAlpha alpha = do
     
 -- | Init the PDF color space to RGB.
 setRGBColorSpace :: Draw ()
-setRGBColorSpace = tell . serialize $ "\n/DeviceRGB CS\n/DeviceRGB cs\n"
+setRGBColorSpace = do
+    recordDeviceColours rgbColours
+    tell . serialize $ "\n/DeviceRGB CS\n/DeviceRGB cs\n"
 
 
 
@@ -99,10 +101,11 @@ colour_operator :: MonadPath m => String -- ^ Operator for an RGB colour
                 -> Color
                 -> m ()
 colour_operator rgb gray cmyk colour = case colour of
-    Rgb r g b -> tell (operator [r, g, b] rgb)
-    Hsv h s v -> let (r, g, b) = hsvToRgb (h, s, v) in tell (operator [r, g, b] rgb)
-    Gray g -> tell (operator [g] gray)
-    Cmyk c m y k -> recordCmykColour >> tell (operator [c, m, y, k] cmyk)
+    Rgb r g b -> recordDeviceColours rgbColours >> tell (operator [r, g, b] rgb)
+    Hsv h s v -> let (r, g, b) = hsvToRgb (h, s, v)
+                 in recordDeviceColours rgbColours >> tell (operator [r, g, b] rgb)
+    Gray g -> recordDeviceColours grayColours >> tell (operator [g] gray)
+    Cmyk c m y k -> recordDeviceColours cmykColours >> tell (operator [c, m, y, k] cmyk)
   where
     operator :: [PDFFloat] -> String -> Builder
     operator components name = mconcat $

@@ -28,7 +28,8 @@
 --
 -- What is checked: the part is 2 or 3 and the conformance level is B; each
 -- font is embedded (the standard 14 fonts are not); the output intent is an
--- RGB ICC profile and no image is DeviceCMYK; each embedded file has a MIME
+-- RGB, CMYK or gray ICC profile, and the document uses only the device
+-- colours that this profile permits; each embedded file has a MIME
 -- type, and a PDF/A-2 document has no embedded file; there is no text
 -- annotation (it would need an appearance stream); the prefix and the
 -- property names of the XMP extensions are XML names. A document that
@@ -36,8 +37,7 @@
 -- returns the reasons, 'Graphics.PDF.writePdf' raises an exception.
 -- See Note [Device colours in a PDF/A document] in "Graphics.PDF".
 --
--- What is not checked: a shading or a transparency group must not use
--- 'Graphics.PDF.CMYKSpace'. Transparency, encryption, JavaScript, LZW and
+-- What is not checked: transparency, encryption, JavaScript, LZW and
 -- actions are never written by HPDF unless asked for; a document that asks
 -- for them is not PDF/A, and nothing here stops it.
 ---------------------------------------------------------
@@ -79,9 +79,14 @@ import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Draw
 import Graphics.PDF.Pages (createContent, addObject)
 
--- | PDF/A-3B with this ICC profile (sRGB) as the output intent, no title,
--- no extension schema. The profile must be an RGB profile. Set
--- 'pdfaOutputCondition' too for a profile that is not sRGB.
+-- | PDF/A-3B with this ICC profile as the output intent, no title, no
+-- extension schema. Set 'pdfaOutputCondition' too for a profile that is
+-- not sRGB.
+--
+-- The profile is an RGB, CMYK or gray profile. It decides the colours that
+-- the document can use: 'Graphics.PDF.Rgb' colours and RGB images with an
+-- RGB profile, 'Graphics.PDF.Cmyk' colours and CMYK images with a CMYK
+-- profile, and 'Graphics.PDF.Gray' colours with any profile.
 pdfa3b :: B.ByteString -> PDFA
 pdfa3b icc = PDFA
   { pdfaPart = 3

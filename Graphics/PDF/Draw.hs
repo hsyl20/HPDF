@@ -198,15 +198,21 @@ data Color = Rgb !Double !Double !Double -- ^ Red, green, blue (DeviceRGB)
 -- A CMYK colour is for a printer: a reader converts it for a screen, and
 -- the result depends on the reader.
 --
--- Some parts of a document take only an RGB colour: the colour of an
--- outline, and the two colours of a shading. There, a gray is written as
--- an RGB colour with three equal components, and a CMYK colour is
--- converted with the simple formula of PDF 32000-1, 10.3.5
--- (red = 1 - min 1 (cyan + black)), which does not use a colour profile.
+-- Two parts of a document take only an RGB colour: the colour of an
+-- outline, and the colour of an uncoloured pattern
+-- ('Graphics.PDF.Pattern.setUncoloredFillPattern'), whose colour space is
+-- [/Pattern /DeviceRGB]. There, a gray is written as an RGB colour with
+-- three equal components, and a CMYK colour is converted with the simple
+-- formula of PDF 32000-1, 10.3.5 (red = 1 - min 1 (cyan + black)), which
+-- does not use a colour profile.
 --
--- A PDF/A document with an RGB output intent cannot use a CMYK colour:
--- each stream records that it uses one ('cmykColours'), and this is then a
--- problem of the document. A gray colour is permitted.
+-- A shading has its own colour space ('GraySpace', 'RGBSpace',
+-- 'CMYKSpace'), with a function that gives the colours.
+--
+-- A PDF/A document can use only the device colour spaces that its output
+-- intent permits. Thus each stream records the device colour spaces of its
+-- colour operators ('deviceColours'). See Note [Device colours in a PDF/A
+-- document] in Graphics.PDF.
 
 data DrawState = DrawState {
                    supplyNames :: [String]
@@ -225,7 +231,7 @@ data DrawState = DrawState {
                 ,  usedGlyphs :: M.Map String IS.IntSet -- ^ Glyph ids shown with each subset font, by font name
                 ,  unembeddedFonts :: Set.Set String -- ^ Names of the fonts used whose program is not in the document
                 ,  streamFont :: Maybe PDFFont -- ^ Font of the graphics state. See Note [Font of a text object] in Graphics.PDF.Text
-                ,  cmykColours :: !Bool -- ^ The stream has a CMYK colour. See Note [Device colours]
+                ,  deviceColours :: !DeviceColours -- ^ Device colour spaces of the colour operators of the stream. See Note [Device colours]
                 }
 data DrawEnvironment = DrawEnvironment {
                         streamId :: Int
@@ -286,7 +292,7 @@ instance Functor Draw where
      fmap f = \m -> do { a <- m; return (f a) }
 
 instance MonadPath Draw where
-    recordCmykColour = modifyStrict $ \s -> s {cmykColours = True}
+    recordDeviceColours c = modifyStrict $ \s -> s {deviceColours = deviceColours s <> c}
 
 readDrawST :: (forall s. DrawTuple s -> STRef s a) -> Draw a
 readDrawST   f   = Draw $ \env -> readSTRef   (f env) 
@@ -347,7 +353,7 @@ supplyName = do
 emptyDrawState :: Int -> DrawState
 emptyDrawState ref = 
     let names = (map (("O" ++ (show ref)) ++ ) $ [replicate k ['a'..'z'] | k <- [1..]] >>= sequence) in
-    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty Set.empty Nothing False
+    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty Set.empty Nothing mempty
   
 -- | Execute the drawing commands to get a new state and an uncompressed PDF stream
 runDrawing :: Draw a -> DrawEnvironment -> DrawState -> (a,DrawState,BU.Builder)
@@ -641,7 +647,7 @@ data PDFA = PDFA {
     pdfaPart :: !Int -- ^ PDF/A part: 3, or 2 for a document without embedded files
   , pdfaConformance :: !String -- ^ conformance level: @B@ only
   , pdfaTitle :: !T.Text -- ^ document title (Info @/Title@ and @dc:title@); empty for none
-  , pdfaOutputProfile :: !B.ByteString -- ^ the ICC profile of the output intent (an RGB profile such as sRGB)
+  , pdfaOutputProfile :: !B.ByteString -- ^ the ICC profile of the output intent: an RGB profile such as sRGB, a CMYK profile or a gray profile
   , pdfaOutputCondition :: !T.Text -- ^ its @OutputConditionIdentifier@, e.g. @sRGB IEC61966-2.1@
   , pdfaExtensions :: [XMPExtension] -- ^ XMP properties outside the predefined schemas, with their PDF/A extension schema description
   }

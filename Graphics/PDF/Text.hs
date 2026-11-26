@@ -93,10 +93,10 @@ data TextParameter = TextParameter { tc :: !PDFFloat
                                    , fontState :: FontState
                                    , currentFont :: Maybe PDFFont
                                    , glyphsShown :: M.Map String IS.IntSet
-                                   , textCmyk :: !Bool -- ^ The text has a CMYK colour. See Note [Device colours] in Graphics.PDF.Draw
+                                   , textColours :: !DeviceColours -- ^ Device colour spaces of the colour operators of the text. See Note [Device colours] in Graphics.PDF.Draw
                                    }
 defaultParameters ::  TextParameter
-defaultParameters = TextParameter 0 0 100 0 0 (Set.empty) Nothing M.empty False
+defaultParameters = TextParameter 0 0 100 0 0 (Set.empty) Nothing M.empty mempty
 
      
 -- | The text monad 
@@ -145,7 +145,7 @@ instance MonadWriter Builder PDFText where
       (# (a, f), s', w' #) -> (# a, s', w `mappend` f w' #)
     
 instance MonadPath PDFText where
-    recordCmykColour = modifyStrict $ \s -> s {textCmyk = True}
+    recordDeviceColours c = modifyStrict $ \s -> s {textColours = textColours s <> c}
 
 -- | Unscaled unit (not scaled by the font size)
 type UnscaledUnit = PDFFloat  
@@ -201,7 +201,7 @@ drawText t = do
     let unembedded = Set.fromList [ name f | f <- Set.elems (fontState s), not (fontEmbedded f) ]
     unless (Set.null unembedded) $ modifyStrict $ \st ->
        st { unembeddedFonts = Set.union unembedded (unembeddedFonts st) }
-    when (textCmyk s) recordCmykColour
+    when (textColours s /= mempty) (recordDeviceColours (textColours s))
     tell . serialize $ "\nBT"
     tell w
     tell . serialize $ "\nET"
