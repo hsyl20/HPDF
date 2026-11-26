@@ -8,10 +8,13 @@
 --
 -- Writes signed.pdf, and encrypted-signed.pdf: the same document,
 -- encrypted (AES-256, the user password "user" and the owner password
--- "owner", printing only), then signed. The two files are in PEM: a
--- private key that is not encrypted (RSA, or EC on a named curve), and
--- its certificate followed by the other certificates of its chain. For a
--- test:
+-- "owner", printing only), then signed. Then signed-twice.pdf and
+-- encrypted-signed-twice.pdf: each file with a second signature, in an
+-- incremental update.
+--
+-- key.pem and certificates.pem are in PEM: a private key that is not
+-- encrypted (RSA, or EC on a named curve), and its certificate followed
+-- by the other certificates of its chain. For a test:
 --
 -- > openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem \\
 -- >   -out certificates.pem -days 30 -subj "/CN=Test"
@@ -21,6 +24,7 @@ module Main where
 import Graphics.PDF
 import Graphics.PDF.Encryption
 import Graphics.PDF.Signature
+import qualified Graphics.PDF.File as F
 import qualified Data.ByteString.Lazy as BL
 import System.Environment (getArgs)
 import System.Exit (die)
@@ -48,3 +52,15 @@ main = do
   encrypted <- encryptPdf enc unsigned >>= either die return
   signPdfWith signer encrypted >>= either die (BL.writeFile "encrypted-signed.pdf")
   putStrLn "encrypted-signed.pdf written"
+  -- A second signature of each file, in an incremental update: the first
+  -- signature stays valid. The owner password opens the encrypted file,
+  -- and the update is encrypted with the key of the file.
+  let second = signature { sigFieldName = "Signature2", sigName = "HPDF", sigReason = "Second signature" }
+      twice password from to = do
+        source <- F.readPdfSource password from >>= either die return
+        file <- either die return (addSignatureField second 1 (F.sourceFile source))
+        update <- F.updatePdfFile source file >>= either die return
+        signPdfWith signer update >>= either die (BL.writeFile to)
+        putStrLn (to ++ " written")
+  twice "" "signed.pdf" "signed-twice.pdf"
+  twice "owner" "encrypted-signed.pdf" "encrypted-signed-twice.pdf"

@@ -79,8 +79,23 @@ main = do
 For a key that the program cannot read (a smart card, an HSM, a signing
 service), `signPdf` gives the bytes to sign to your function instead.
 
-A document has one signature, and the signature field is not visible. See
-`HPDF-Sign-Demo` (Test/sign.hs).
+The signature field is not visible. A second signature is in an
+incremental update of the signed file, so that the first signature stays
+valid:
+
+```haskell
+import qualified Graphics.PDF.File as F
+
+main = do
+  Right signer <- readSigner "key.pem" "certificates.pem"
+  Right source <- F.readPdfSource "" "signed.pdf"
+  let Right file = addSignatureField signature { sigFieldName = "Signature2" } 1 (F.sourceFile source)
+  Right update <- F.updatePdfFile source file
+  signed <- signPdfWith signer update
+  either fail (B.writeFile "signed-twice.pdf") signed
+```
+
+See `HPDF-Sign-Demo` (Test/sign.hs).
 
 ## Encryption
 

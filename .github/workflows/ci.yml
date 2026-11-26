@@ -81,7 +81,9 @@ jobs:
 
     # openssl makes a key and a certificate; pdfsig (poppler) verifies the
     # signature of the document, and of the document encrypted then signed.
-    - name: Sign a document and verify the signature
+    # The files signed twice have two valid signatures: the first one signs
+    # the file before the incremental update.
+    - name: Sign a document and verify the signatures
       run: |
         sudo apt-get install -y poppler-utils
         openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem \
@@ -94,6 +96,13 @@ jobs:
         grep -q 'Signature Validation: Signature is Valid' pdfsig-encrypted.txt
         grep -q 'Total document signed' pdfsig-encrypted.txt
         pdfinfo -upw user encrypted-signed.pdf | grep -q 'algorithm:AES-256'
+        for f in signed-twice.pdf encrypted-signed-twice.pdf; do
+          pdfsig -upw user "$f" | tee "pdfsig-$f.txt"
+          test "$(grep -c 'Signature Validation: Signature is Valid' "pdfsig-$f.txt")" = 2
+          grep -q 'Signature Field Name: Signature2' "pdfsig-$f.txt"
+          grep -q 'Not total document signed' "pdfsig-$f.txt"
+          grep -q 'Total document signed' "pdfsig-$f.txt"
+        done
 
     # veraPDF is the reference validator for PDF/A.
     - name: Validate the PDF/A demo with veraPDF
