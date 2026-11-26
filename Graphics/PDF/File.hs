@@ -23,6 +23,14 @@
 -- document, as values ('PdfFile'): the structure of the file (object
 -- streams, cross-reference streams, linearization) is not kept.
 --
+-- An incremental update adds the changes of a file after its bytes, and
+-- keeps the bytes, thus the signatures, and the encryption:
+--
+-- > Right source <- readPdfSource "" "in.pdf"
+-- > let file = sourceFile source
+-- > Right bytes <- updatePdfFile source file { pdfObjects = ... }
+-- > L.writeFile "out.pdf" bytes
+--
 -- The constructors of 'Value' have short names ('String', 'Integer'),
 -- thus this module is for a qualified import:
 --
@@ -44,6 +52,15 @@ module Graphics.PDF.File
   , defaultLimits
   , renderPdfFile
   , writePdfFile
+    -- * Incremental updates
+  , PdfSource
+  , sourceFile
+  , readPdfSource
+  , parsePdfSource
+  , updatePdfFile
+  , updatePdfFileWith
+  , UpdateOptions(..)
+  , defaultUpdateOptions
     -- * Permissions of an encrypted file
   , Permissions(..)
   , allPermissions
@@ -59,6 +76,8 @@ module Graphics.PDF.File
   , realToRational
   , getObject
   , resolveValue
+  , pdfPages
+  , isSignatureDict
     -- * Values as bytes
   , parseValue
   , parseValueWith
@@ -77,6 +96,7 @@ import Graphics.PDF.File.Parse
 import Graphics.PDF.File.Lexer (parseValue, parseValueWith)
 import Graphics.PDF.File.Object
 import Graphics.PDF.File.Permissions
+import Graphics.PDF.File.Update
 import Graphics.PDF.File.Write
 
 -- | Read a PDF file. 'Left' gives the reason the file cannot be read. An
@@ -89,7 +109,13 @@ readPdfFile path = read_with parsePdfFile path
 readPdfFileWithPassword :: T.Text -> FilePath -> IO (Either String PdfFile)
 readPdfFileWithPassword password = read_with (parsePdfFileWithPassword defaultLimits password)
 
-read_with :: (S.ByteString -> Either String PdfFile) -> FilePath -> IO (Either String PdfFile)
+-- | Read a PDF file for an incremental update ('updatePdfFile'), and
+-- decrypt it with a password if it is encrypted (an empty password for a
+-- file that is not encrypted). See 'parsePdfSource'.
+readPdfSource :: T.Text -> FilePath -> IO (Either String PdfSource)
+readPdfSource password = read_with (parsePdfSource defaultLimits password)
+
+read_with :: (S.ByteString -> Either String a) -> FilePath -> IO (Either String a)
 read_with parse path = do
   r <- try (S.readFile path)
   return $ case r of

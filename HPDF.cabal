@@ -70,6 +70,7 @@ Test-Suite HPDF-Tests
                      Tests.PDFA
                      Tests.PdfFile
                      Tests.Encryption
+                     Tests.Update
                      Tests.Signature
                      Tests.TrueType
                      Tests.Typesetting
@@ -207,6 +208,7 @@ library
      Graphics.PDF.File.Cipher
      Graphics.PDF.File.Crypt
      Graphics.PDF.File.Encrypt
+     Graphics.PDF.File.Update
      Graphics.PDF.LowLevel.PNG
      Graphics.PDF.LowLevel.Signature
      Graphics.PDF.LowLevel.CMS

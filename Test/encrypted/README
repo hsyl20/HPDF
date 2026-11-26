@@ -36,6 +36,11 @@ and:
   r6-aes-256-same-passwords.pdf  /R 6, "same" is the user password and
                                  the owner password
 
+The incremental updates (Test/Tests/Update.hs) also use:
+
+  objstm.pdf                     not encrypted, with object streams and a
+                                 cross-reference stream
+
 qpdf is an implementation of the handler that is independent of HPDF. To
 make the files again, in this directory:
 

@@ -6,7 +6,12 @@
 ---------------------------------------------------------
 module Graphics.PDF.File.Write
   ( renderValue
+  , renderDict
   , renderPdfFile
+  , renderObjects
+  , XrefEntry(..)
+  , xrefTable
+  , xrefStream
   ) where
 
 import qualified Data.ByteString as S
@@ -103,7 +108,9 @@ escape_literal s
 -- Note [Files of the writer]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~
 -- The writer gives a file with one cross-reference table, and no object
--- stream and no cross-reference stream:
+-- stream and no cross-reference stream (an incremental update can have a
+-- cross-reference stream: see Note [Incremental update] in
+-- Graphics.PDF.File.Update):
 --
 --   %PDF-1.7
 --   %<four bytes above 127>
@@ -127,8 +134,9 @@ escape_literal s
 -- large gaps does not give a large table. An object 0 is not written. The
 -- /Length of a stream is the length of its data. A signed file is written
 -- again with its signature, but the signature is then not valid: it signs
--- the bytes of the old file. See Note [Signatures of the writer] for a
--- file that is not signed.
+-- the bytes of the old file ('Graphics.PDF.File.updatePdfFile' keeps
+-- them). See Note [Signatures of the writer] for a file that is not
+-- signed.
 
 -- Note [Signatures of the writer]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -153,35 +161,74 @@ escape_literal s
 -- | The bytes of a PDF file.
 -- See Note [Files of the writer]
 renderPdfFile :: PdfFile -> L.ByteString
-renderPdfFile file = L.concat (header : bodies) <> rest
+renderPdfFile file = header <> renderObjects (L.length header) objects xref_and_trailer
   where
-    rest = B.toLazyByteString (xref <> trailer)
     (major, minor) = pdfVersion file
     header = B.toLazyByteString (B.string7 ("%PDF-" ++ show major ++ "." ++ show minor ++ "\n%")
                                  <> B.word8 0xE2 <> B.word8 0xE3 <> B.word8 0xCF <> B.word8 0xD3 <> B.char7 '\n')
     -- the object numbers start at 1: an object 0 is not written
     objects = IM.toList (snd (IM.split 0 (pdfObjects file)))
-    -- See Note [Signatures of the writer]
+    size = maybe 1 ((+ 1) . fst) (IM.lookupMax (pdfObjects file))
+    xref_and_trailer offsets start_xref =
+      let entries = IM.fromList ((0, FreeEntry 0 65535) : [ (n, InUse off g) | ((n, (g, _)), off) <- zip objects offsets ])
+      in B.toLazyByteString $ xrefTable entries <> B.string7 "trailer\n"
+           <> renderDict (M.insert (C.pack "Size") (Integer (fromIntegral size)) (pdfTrailer file))
+           <> B.string7 ("\nstartxref\n" ++ show start_xref ++ "\n%%EOF\n")
+
+-- | The bytes of objects at an offset of a file, then the bytes that the
+-- offsets of the objects and the offset after them give (a cross-reference
+-- section). The byte range of a signature dictionary that is not signed
+-- ends at the end of these bytes.
+-- See Note [Signatures of the writer]
+renderObjects :: Int64 -> [(Int, (Int, Object))] -> ([Int64] -> Int64 -> L.ByteString) -> L.ByteString
+renderObjects start objects end_of = L.concat bodies <> rest
+  where
     first_bodies = [ B.toLazyByteString (render_object Nothing n g o) | (n, (g, o)) <- objects ]
-    offsets = scanl (+) (L.length header) (map L.length first_bodies)
+    offsets = scanl (+) start (map L.length first_bodies)
+    rest = end_of (init offsets) (last offsets)
     total = last offsets + L.length rest
     bodies = [ case o of
                  Plain (Dict d) | Just _ <- unsigned_signature d -> B.toLazyByteString (render_object (Just (off, total)) n g o)
                  _ -> body
              | ((n, (g, o)), off, body) <- zip3 objects offsets first_bodies ]
-    entries = IM.fromList (zip (map fst objects) (zip offsets (map (fst . snd) objects)))
-    start_xref = last offsets
-    size = maybe 1 ((+ 1) . fst) (IM.lookupMax entries)
-    xref = B.string7 "xref\n" <> mconcat (map subsection (runs (0 : IM.keys entries)))
+
+-- | An entry of a cross-reference section
+data XrefEntry
+  = InUse !Int64 !Int -- ^ The offset and the generation of an object
+  | FreeEntry !Int !Int -- ^ The number of the next free entry, and the generation of the next object with this number
+
+-- | A cross-reference table, with a subsection for each run of numbers
+xrefTable :: IM.IntMap XrefEntry -> B.Builder
+xrefTable entries = B.string7 "xref\n" <> mconcat (map subsection (runs (IM.keys entries)))
+  where
     subsection ns@(first : _) = B.string7 (show first ++ " " ++ show (length ns) ++ "\n") <> mconcat (map line ns)
     subsection [] = mempty
-    line 0 = B.string7 "0000000000 65535 f \n"
     line n = case IM.lookup n entries of
-      Just (off, g) -> B.string7 (printf "%010d %05d n \n" (off :: Int64) g)
+      Just (InUse off g) -> B.string7 (printf "%010d %05d n \n" off g)
+      Just (FreeEntry next g) -> B.string7 (printf "%010d %05d f \n" next g)
       Nothing -> mempty
-    trailer = B.string7 "trailer\n"
-      <> renderDict (M.insert (C.pack "Size") (Integer (fromIntegral size)) (pdfTrailer file))
-      <> B.string7 ("\nstartxref\n" ++ show start_xref ++ "\n%%EOF\n")
+
+-- | A cross-reference stream (PDF 32000-1, 7.5.8) with no filter: its
+-- number, the entries of the trailer, and the entries of the section. The
+-- entries must have the one of the stream.
+xrefStream :: Int -> Dict -> IM.IntMap XrefEntry -> B.Builder
+xrefStream number trailer entries = render_object Nothing number 0 (Stream dict rows) <> B.string7 "\n"
+  where
+    width = max 1 (length (takeWhile (> 0) (iterate (`div` 256) (maximum (1 : map field (IM.elems entries))))))
+    field e = case e of
+      InUse off _ -> off
+      FreeEntry next _ -> fromIntegral next
+    big_endian :: Int -> Int64 -> [Word8]
+    big_endian k x = [ fromIntegral (x `div` 256 ^ i) | i <- [k - 1, k - 2 .. 0] ]
+    row e = case e of
+      InUse off g -> 1 : big_endian width off ++ big_endian 2 (fromIntegral g)
+      FreeEntry next g -> 0 : big_endian width (fromIntegral next) ++ big_endian 2 (fromIntegral g)
+    rows = S.pack (concatMap row (IM.elems entries))
+    index = concat [ [Integer (fromIntegral first), Integer (fromIntegral (length ns))] | ns@(first : _) <- runs (IM.keys entries) ]
+    size = maybe 1 ((+ 1) . fst) (IM.lookupMax entries)
+    dict = M.union (M.fromList [ (C.pack "Type", Name (C.pack "XRef")), (C.pack "W", Array (map Integer [1, fromIntegral width, 2]))
+                               , (C.pack "Index", Array index), (C.pack "Size", Integer (fromIntegral size)) ])
+                   trailer
 
 -- | A signature dictionary that is not signed: the number of bytes of its
 -- /Contents, and its other entries.

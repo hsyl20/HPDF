@@ -11,6 +11,8 @@ module Graphics.PDF.File.Parse
   , parsePdfFile
   , parsePdfFileWith
   , parsePdfFileWithPassword
+  , PdfSource(..)
+  , parsePdfSource
   ) where
 
 import Control.Monad (foldM, forM, unless, when)
@@ -117,15 +119,32 @@ parsePdfFileWith limits = parsePdfFileWithPassword limits T.empty
 -- See Note [Standard security handler] and Note [Permissions of a
 -- decrypted file] in Graphics.PDF.File.Crypt
 parsePdfFileWithPassword :: Limits -> T.Text -> S.ByteString -> Either String PdfFile
-parsePdfFileWithPassword limits password bytes = prefix_error $ do
+parsePdfFileWithPassword limits password bytes = sourceFile <$> parsePdfSource limits password bytes
+
+-- | A file that the reader read, with what an incremental update of the
+-- file needs. See Note [Incremental update] in Graphics.PDF.File.Update
+data PdfSource = PdfSource
+  { sourceFile :: !PdfFile -- ^ The objects of the file
+  , sourceBytes :: !S.ByteString -- ^ The bytes of the file
+  , sourceStartXref :: !Integer -- ^ The offset of the newest cross-reference section, as the file gives it
+  , sourceBase :: !Int -- ^ The base of the offsets. See Note [Garbage before the header]
+  , sourceXrefStream :: !Bool -- ^ The newest cross-reference section is a stream
+  , sourceSize :: !Int -- ^ The number after the numbers of the cross-reference sections (in use or free)
+  , sourceEncryption :: !(Maybe (Decryptor, Value)) -- ^ The key of an encrypted file, and the /Encrypt of its trailer
+  }
+
+-- | Read a PDF file for an incremental update, and decrypt it with a
+-- password if it is encrypted. See 'parsePdfFileWithPassword'
+parsePdfSource :: Limits -> T.Text -> S.ByteString -> Either String PdfSource
+parsePdfSource limits password bytes = prefix_error $ do
   (version, header) <- find_header bytes
   start <- find_startxref bytes
   let budget = Budget (limitTotal limits) (limitObjects limits)
       read_with base = read_sections limits bytes base budget start
   -- See Note [Garbage before the header]
-  (entries, trailers, budget') <- case read_with 0 of
-    Left e | header > 0 -> either (const (Left e)) Right (read_with header)
-    r -> r
+  ((entries, trailers, budget'), base) <- case read_with 0 of
+    Left e | header > 0 -> either (const (Left e)) (\r -> Right (r, header)) (read_with header)
+    r -> (\x -> (x, 0)) <$> r
   let trailer = foldr (M.unionWith (\newer _ -> newer)) M.empty trailers
   case dictLookup (C.pack "Root") trailer of
     Just (Ref _ _) -> Right ()
@@ -142,14 +161,27 @@ parsePdfFileWithPassword limits password bytes = prefix_error $ do
             _ -> S.empty
           no_password = if T.null password then (++ " (no password was given)") else id
       dec <- either (Left . no_password) Right (openEncryption d file_id password)
-      Right (Just (dec, number))
-  objects <- load_objects limits bytes budget' entries decryption
-  let encryption_object n = maybe False ((== Just n) . snd) decryption
-  Right PdfFile
-    { pdfVersion = version
-    , pdfTrailer = foldr M.delete trailer (map C.pack ("Encrypt" : xref_keys))
-    , pdfObjects = IM.filterWithKey (\n (_, o) -> not (removed o || encryption_object n)) objects
-    , pdfPermissions = decryption >>= decryptorPermissions . fst
+      Right (Just (dec, number, e))
+  objects <- load_objects limits bytes budget' entries ((\(dec, n, _) -> (dec, n)) <$> decryption)
+  let encryption_object n = maybe False (\(_, number, _) -> number == Just n) decryption
+      file = PdfFile
+        { pdfVersion = version
+        , pdfTrailer = foldr M.delete trailer (map C.pack ("Encrypt" : xref_keys))
+        , pdfObjects = IM.filterWithKey (\n (_, o) -> not (removed o || encryption_object n)) objects
+        , pdfPermissions = decryption >>= \(dec, _, _) -> decryptorPermissions dec
+        }
+  -- the section that "startxref" gives was read: its offset is in the file
+  (is_table, _) <- runParser (optionalKeyword "xref") bytes (fromInteger start + base)
+  Right PdfSource
+    { sourceFile = file
+    , sourceBytes = bytes
+    , sourceStartXref = start
+    , sourceBase = base
+    , sourceXrefStream = not is_table
+    -- the /Size of the trailer can be larger than the numbers of the
+    -- file: a new object would get a number that readers refuse
+    , sourceSize = maybe 1 ((+ 1) . fst) (M.lookupMax entries)
+    , sourceEncryption = (\(dec, _, e) -> (dec, e)) <$> decryption
     }
   where
     prefix_error = either (Left . ("PDF: " ++)) Right

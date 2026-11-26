@@ -131,6 +131,23 @@ encrypted file with its password (`F.readPdfFileWithPassword`): RC4,
 AES-128 and AES-256. `HPDF-Rewrite-Demo` (Test/rewrite.hs) reads a file
 and writes it again.
 
+`F.updatePdfFile` writes an incremental update: the bytes of the file,
+then only the objects that changed and a new cross-reference section.
+The signatures of the file thus stay valid, and the objects of the update
+of an encrypted file are encrypted with the key of the file:
+
+```haskell
+Right source <- F.readPdfSource "owner password" "in.pdf"
+let file = F.sourceFile source
+Right bytes <- F.updatePdfFile source file { F.pdfObjects = ... }
+L.writeFile "out.pdf" bytes
+```
+
+An update respects the restrictions of the file: the permission to modify
+an encrypted file that the user password opened, and a DocMDP signature
+that certifies the file with no changes. `F.updatePdfFileWith` can
+ignore them.
+
 ## Documentation
 
 The library documentation can be accessed on [Hackage](https://hackage.haskell.org/package/HPDF)

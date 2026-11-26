@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 ---------------------------------------------------------
 -- |
 -- License     : BSD-style
@@ -11,11 +12,15 @@ module Graphics.PDF.File.Crypt
   , decryptorPermissions
   , openEncryption
   , decryptObject
+  , aes256Decryptor
+  , encryptObject
   , notEncrypted
   , withLength
   ) where
 
 import Control.Monad (unless, when)
+import Control.Monad.Except (ExceptT, runExceptT, throwError)
+import Control.Monad.Trans (lift)
 import Data.Bits (xor)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
@@ -76,7 +81,9 @@ import Graphics.PDF.File.Permissions (Permissions, permissionsFromValue)
 -- again ('renderPdfFile') is not encrypted: the caller applies them.
 -- 'Graphics.PDF.File.encryptPdfFile' refuses a file with permissions
 -- that are not all the permissions, unless the caller says to ignore
--- them: an encryption with a new owner password would remove them.
+-- them: an encryption with a new owner password would remove them. An
+-- incremental update needs the permission to modify the file (Note
+-- [Restrictions of an update] in Graphics.PDF.File.Update).
 
 -- Note [Objects that are not encrypted]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -96,7 +103,8 @@ import Graphics.PDF.File.Permissions (Permissions, permissionsFromValue)
 data Method = Identity | Rc4 | AesV2 | AesV3
   deriving (Eq, Show)
 
--- | The key and the methods of an encrypted file
+-- | The key and the methods of an encrypted file. They decrypt its
+-- objects, and encrypt the objects of an update ('encryptObject').
 data Decryptor = Decryptor
   { dec_key :: !S.ByteString -- ^ The key of the file
   , dec_strings :: !Method
@@ -309,6 +317,42 @@ decrypt_bytes dec method n g bytes = case method of
   Rc4 -> Right (rc4 (object_key dec Rc4 n g) bytes)
   _ -> maybe (Left ("the encrypted data of the object " ++ show n ++ " is not correct")) Right
              (aesDecrypt (object_key dec method n g) bytes)
+
+-- | The methods of /V 5 with a key of the file of 32 bytes: AES-256 for
+-- the strings, the streams and the metadata
+aes256Decryptor :: S.ByteString -> Decryptor
+aes256Decryptor key = Decryptor key AesV3 AesV3 True Nothing
+
+-- | Encrypt the strings and the stream data of an object with its number
+-- and its generation: the inverse of 'decryptObject'. The action gives
+-- the random IV (16 bytes) of each AES string or stream.
+-- See Note [Objects that are not encrypted]
+encryptObject :: forall m. Monad m => m S.ByteString -> Decryptor -> Int -> Int -> Object -> m (Either String Object)
+encryptObject random_iv dec n g o = runExceptT $ case o of
+  Plain v -> Plain <$> value v
+  Stream d _ | is_type "XRef" d -> return o
+  Stream d bytes -> do
+    d' <- traverse value d
+    if is_type "Metadata" d && not (dec_metadata dec)
+      then return (Stream d' bytes)
+      else withLength d' <$> encrypt (dec_streams dec) bytes
+  where
+    is_type t d = dictLookup (C.pack "Type") d == Just (Name (C.pack t))
+    encrypt :: Method -> S.ByteString -> ExceptT String m S.ByteString
+    encrypt method bytes = case method of
+      Identity -> return bytes
+      Rc4 -> return (rc4 (object_key dec Rc4 n g) bytes)
+      _ -> do
+        iv <- lift random_iv
+        -- AES-128 needs a key of 16 bytes: a short /Length gives another
+        maybe (throwError ("the key of the object " ++ show n ++ " is not a key of AES")) return
+              (aesEncrypt (object_key dec method n g) iv bytes)
+    value :: Value -> ExceptT String m Value
+    value v = case v of
+      String s -> String <$> encrypt (dec_strings dec) s
+      Array vs -> Array <$> traverse value vs
+      Dict d -> Dict <$> M.traverseWithKey (\k x -> if notEncrypted d k then return x else value x) d
+      _ -> return v
 
 -- | A stream whose /Length is the length of its data
 withLength :: Dict -> S.ByteString -> Object

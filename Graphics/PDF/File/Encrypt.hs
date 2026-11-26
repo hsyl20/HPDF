@@ -12,16 +12,16 @@ module Graphics.PDF.File.Encrypt
   ) where
 
 import Control.Monad (unless, when)
-import Control.Monad.State.Strict (State, evalState, state)
-import Crypto.Random (ChaChaDRG, MonadRandom(..), drgNewSeed, randomBytesGenerate, seedFromInteger)
+import Control.Monad.State.Strict (State, evalState)
+import Crypto.Random (ChaChaDRG, MonadRandom)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Graphics.PDF.File.Cipher (aesEcb, aesEncrypt, aesNoPadding, hash2B, int32LE)
-import Graphics.PDF.File.Crypt (notEncrypted, withLength)
+import Graphics.PDF.File.Cipher (aesEcb, aesNoPadding, hash2B, int32LE, newGenerator, randomBytes)
+import Graphics.PDF.File.Crypt (aes256Decryptor, encryptObject)
 import Graphics.PDF.File.Filter (decodeStream)
 import Graphics.PDF.File.Object
 import Graphics.PDF.File.Permissions
@@ -91,10 +91,7 @@ encryption user owner = Encryption user owner allPermissions False
 encryptPdfFile :: MonadRandom m => Encryption -> PdfFile -> m (Either String PdfFile)
 encryptPdfFile enc file = case check of
   Left e -> return (Left e)
-  Right () -> do
-    seed <- getRandomBytes 40
-    let integer = S.foldl' (\a w -> a * 256 + fromIntegral w) 0 (seed :: S.ByteString)
-    return (Right (evalState (encrypt_file enc file) (drgNewSeed (seedFromInteger integer))))
+  Right () -> evalState (encrypt_file enc file) <$> newGenerator
   where
     check = do
       when (T.null (encOwnerPassword enc)) $ Left "the owner password cannot be empty"
@@ -131,19 +128,16 @@ is_pdfa file = case resolveValue file <$> dictLookup (C.pack "Root") (pdfTrailer
         either (const False) (C.pack "pdfaid:part" `S.isInfixOf`) (decodeStream (256 * 1024 * 1024) d raw)
       _ -> False
 
-random_bytes :: Int -> State ChaChaDRG S.ByteString
-random_bytes n = state (randomBytesGenerate n)
-
 -- See Note [Encryption of a file]
-encrypt_file :: Encryption -> PdfFile -> State ChaChaDRG PdfFile
+encrypt_file :: Encryption -> PdfFile -> State ChaChaDRG (Either String PdfFile)
 encrypt_file enc file = do
-  key <- random_bytes 32
-  user_validation <- random_bytes 8
-  user_key_salt <- random_bytes 8
-  owner_validation <- random_bytes 8
-  owner_key_salt <- random_bytes 8
-  perms_random <- random_bytes 4
-  new_id <- random_bytes 16
+  key <- randomBytes 32
+  user_validation <- randomBytes 8
+  user_key_salt <- randomBytes 8
+  owner_validation <- randomBytes 8
+  owner_key_salt <- randomBytes 8
+  perms_random <- randomBytes 4
+  new_id <- randomBytes 16
   let user = S.take 127 (TE.encodeUtf8 (encUserPassword enc))
       owner = S.take 127 (TE.encodeUtf8 (encOwnerPassword enc))
       p = permissionsValue (encPermissions enc)
@@ -165,13 +159,14 @@ encrypt_file enc file = do
       trailer = pdfTrailer prepared
       with_id = if M.member (C.pack "ID") trailer then trailer
                 else M.insert (C.pack "ID") (Array [String new_id, String new_id]) trailer
-  objects <- traverse (\(g, obj) -> (\x -> (g, x)) <$> encrypt_object key obj) (pdfObjects prepared)
-  return prepared
+  objects <- IM.traverseWithKey (\n (g, obj) -> fmap (\x -> (g, x)) <$> encryptObject (randomBytes 16) (aes256Decryptor key) n g obj)
+                                (pdfObjects prepared)
+  return $ (\os -> prepared
     { pdfVersion = max (1, 7) (pdfVersion prepared)
     , pdfTrailer = M.insert (C.pack "Encrypt") (Dict encrypt_dict) with_id
-    , pdfObjects = objects
+    , pdfObjects = os
     , pdfPermissions = Nothing
-    }
+    }) <$> sequence objects
 
 -- | A trailer /Info that is a dictionary becomes an object.
 -- See Note [Encryption of a file]
@@ -207,20 +202,3 @@ with_extension file
             catalog' = M.insert (C.pack "Extensions") (Dict (M.insert (C.pack "ADBE") adbe' extensions)) catalog
         in file { pdfObjects = IM.insert n (g, Plain (Dict catalog')) (pdfObjects file) }
       _ -> file
-
--- | Encrypt the strings and the stream data of an object.
--- See Note [Objects that are not encrypted] in Graphics.PDF.File.Crypt
-encrypt_object :: S.ByteString -> Object -> State ChaChaDRG Object
-encrypt_object key o = case o of
-  Plain v -> Plain <$> value v
-  Stream d bytes -> withLength <$> traverse value d <*> encrypt bytes
-  where
-    encrypt plain = do
-      iv <- random_bytes 16
-      -- a key of 32 bytes and an IV of 16 bytes: AES cannot fail
-      return (maybe S.empty id (aesEncrypt key iv plain))
-    value v = case v of
-      String s -> String <$> encrypt s
-      Array vs -> Array <$> traverse value vs
-      Dict d -> Dict <$> M.traverseWithKey (\k x -> if notEncrypted d k then return x else value x) d
-      _ -> return v

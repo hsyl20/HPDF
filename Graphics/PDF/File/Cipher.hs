@@ -16,8 +16,12 @@ module Graphics.PDF.File.Cipher
   , aesDecrypt
   , aesNoPadding
   , aesEcb
+  , newGenerator
+  , randomBytes
   ) where
 
+import Control.Monad.State.Strict (State, state)
+import Crypto.Random (ChaChaDRG, MonadRandom(..), drgNewSeed, randomBytesGenerate, seedFromInteger)
 import qualified Crypto.Cipher.AES as AES
 import qualified Crypto.Cipher.RC4 as RC4
 import Crypto.Cipher.Types (BlockCipher, Cipher(..), cbcDecrypt, cbcEncrypt, ecbDecrypt, ecbEncrypt, makeIV)
@@ -85,6 +89,16 @@ aesEcb :: Bool -> S.ByteString -> S.ByteString -> Maybe S.ByteString
 aesEcb encrypt key bytes
   | S.length bytes /= 16 = Nothing
   | otherwise = with_aes key (\c -> Just ((if encrypt then ecbEncrypt else ecbDecrypt) c bytes))
+
+-- | A ChaCha generator with a seed of 40 bytes from a 'MonadRandom'. The
+-- work that uses it is then pure.
+newGenerator :: MonadRandom m => m ChaChaDRG
+newGenerator = do
+  seed <- getRandomBytes 40
+  return (drgNewSeed (seedFromInteger (S.foldl' (\a w -> a * 256 + fromIntegral w) 0 (seed :: S.ByteString))))
+
+randomBytes :: Int -> State ChaChaDRG S.ByteString
+randomBytes n = state (randomBytesGenerate n)
 
 -- | The hash of a password for /R 6 (ISO 32000-2, 7.6.4.3.4, algorithm
 -- 2.B): rounds of AES-128 and SHA-2, 64 at least and 288 at most.
