@@ -809,35 +809,44 @@ test_deviceColours = do
   -- the colour of an outline is an RGB colour: red for this CMYK colour
   assertBool (C.pack "/C [1 0 0 ]" `BS.isInfixOf` pdf)
 
--- A PDF/A document with an RGB output intent can use a gray, and cannot
--- use a CMYK colour: in a drawing or in a text object.
-test_pdfaCmykColours :: IO ()
-test_pdfaCmykColours = withTestFont $ \_ d -> do
+-- The profile of the output intent of a PDF/A document decides the device
+-- colours that the document can use, in a drawing and in a text object.
+-- See Note [Device colours in a PDF/A document] in Graphics.PDF
+test_pdfaColoursAndProfiles :: IO ()
+test_pdfaColoursAndProfiles = withTestFont $ \_ d -> do
   let rect = PDFRect 0 0 300 200
-      render drawing = renderPdfE standardDocInfo rect $ do
-        setPDFA (pdfa3b fakeIcc)
+      render space drawing = renderPdfE standardDocInfo rect $ do
+        setPDFA (pdfa3b (fakeIccOf space))
         font <- mkTrueTypeFont d
         page <- addPage Nothing
         drawWithPage page (drawing font)
-      problems = either id (const [])
-      gray _ = fillColor (Gray 0.5) >> strokeColor (Gray 0.25)
-      cmyk _ = strokeColor (Cmyk 0 1 1 0)
-      cmykText font = drawText $ do
+      problems space drawing = either id (const []) (render space drawing)
+      shape colour _ = fillColor colour >> strokeColor colour
+      textIn colour font = drawText $ do
         setFont (PDFFont font 12)
-        fillColor (Cmyk 0 1 1 0)
+        fillColor colour
         textStart 10 10
         displayText (T.pack "text")
-      grayText font = drawText $ do
-        setFont (PDFFont font 12)
-        fillColor (Gray 0.5)
-        textStart 10 10
-        displayText (T.pack "text")
-  assertEqual [] (problems (render gray))
-  assertEqual [] (problems (render grayText))
-  mapM_ (\drawing -> case problems (render drawing) of
-          [problem] -> assertBool ("CMYK" `elem` words problem)
-          other -> assertFailure ("expected one problem, got " ++ show other))
-        [cmyk, cmykText]
+      gray = Gray 0.5
+      rgb = Rgb 1 0 0
+      hsv = Hsv 120 1 1
+      cmyk = Cmyk 0 1 1 0
+      -- profile, colour, name of the device colour space that is a problem
+      table = [ ("RGB ", gray, Nothing), ("RGB ", rgb, Nothing), ("RGB ", hsv, Nothing), ("RGB ", cmyk, Just "DeviceCMYK")
+              , ("CMYK", gray, Nothing), ("CMYK", rgb, Just "DeviceRGB"), ("CMYK", hsv, Just "DeviceRGB"), ("CMYK", cmyk, Nothing)
+              , ("GRAY", gray, Nothing), ("GRAY", rgb, Just "DeviceRGB"), ("GRAY", cmyk, Just "DeviceCMYK") ]
+  mapM_ (\(space, colour, expected) ->
+          mapM_ (\drawing -> case (problems space drawing, expected) of
+                    ([], Nothing) -> return ()
+                    ([problem], Just name) -> assertBoolVerbose problem (name `elem` words problem)
+                    (other, _) -> assertFailure (space ++ ": " ++ show other))
+                [shape colour, textIn colour])
+        table
+  -- a content with no colour operator is permitted with each profile
+  mapM_ (\space -> assertEqual [] (problems space (\font -> drawText (text (PDFFont font 12) 10 10 (T.pack "text")))))
+        ["RGB ", "CMYK", "GRAY"]
+  -- the two colours that a gray profile does not permit are two problems
+  assertEqual 2 (length (problems "GRAY" (\_ -> fillColor rgb >> strokeColor cmyk)))
 
 -- A document without a page is a problem, and not an exception when the
 -- bytes are read.
@@ -912,8 +921,9 @@ test_cmapRangesAreBounded = withTestFont $ \bytes d0 -> do
       assertEqual (glyphOf d0 'A') (glyphOf d 'A')
       assertEqual (glyphOf d0 'A' + 1) (glyphOf d 'B')
 
--- The output intent must be an RGB profile, and an image must not be
--- DeviceCMYK.
+-- The output intent is an RGB, CMYK or gray profile, with its number of
+-- components. An image, a shading and a pattern are checked as the colours
+-- are.
 test_pdfaDeviceColours :: IO ()
 test_pdfaDeviceColours = do
   let rect = PDFRect 0 0 300 200
@@ -921,21 +931,44 @@ test_pdfaDeviceColours = do
         setPDFA (pdfa3b icc)
         _ <- addPage Nothing
         return ()
-  assertBool (either (const False) (C.pack "/N 3" `BS.isInfixOf`) (render (fakeIccOf "RGB ")))
-  assertBool (not (isRight (render (fakeIccOf "CMYK"))))
-  assertBool (not (isRight (render (fakeIccOf "GRAY"))))
+      components n = either (const False) (C.pack ("/N " ++ show (n :: Int) ++ "\n") `BS.isInfixOf`)
+  assertBool (components 3 (render (fakeIccOf "RGB ")))
+  assertBool (components 4 (render (fakeIccOf "CMYK")))
+  assertBool (components 1 (render (fakeIccOf "GRAY")))
+  assertBool (not (isRight (render (fakeIccOf "Lab "))))
   assertBool (not (isRight (render (BL.fromStrict (C.pack "too short")))))
   -- the header of a CMYK JPEG image of 1 x 1
   let Right cmyk = readJpegDataURL "data:image/jpeg;base64,/9j/wAAUCAABAAEEAREAAhEAAxEABBEA/9k="
-      withImage pdfa = renderPdfE standardDocInfo rect $ do
-        pdfa
-        img <- createPDFJpeg cmyk
+      problems space content = either id (const []) $ renderPdfE standardDocInfo rect $ do
+        setPDFA (pdfa3b (fakeIccOf space))
         page <- addPage Nothing
+        content page
+      cmykImage page = createPDFJpeg cmyk >>= \img -> drawWithPage page (drawXObject img)
+      rgbImage page = do
+        img <- createPDFRawImageFromByteString 1 1 False NoFilter (BL.pack [255, 0, 0])
         drawWithPage page (drawXObject img)
-  assertBool (isRight (withImage (return ())))
-  case withImage (setPDFA (pdfa3b fakeIcc)) of
-    Left [problem] -> assertBool ("DeviceCMYK;" `elem` words problem)
-    other -> assertFailure ("expected one problem, got " ++ either show (const "a document") other)
+      -- a shading has the colour space of its function
+      shading page = drawWithPage page $
+        paintWithShading (AxialShading 0 0 100 100 (ColorFunction1 RGBSpace (Interpolated1 1 (1, 0, 0) (0, 0, 1))))
+                         (addShape (Rectangle (0 :+ 0) (100 :+ 100)))
+      cmykShading page = drawWithPage page $
+        paintWithShading (AxialShading 0 0 100 100 (ColorFunction1 CMYKSpace (Interpolated1 1 (0, 1, 1, 0) (1, 0, 0, 0))))
+                         (addShape (Rectangle (0 :+ 0) (100 :+ 100)))
+      expect name found = case found of
+        [problem] -> assertBoolVerbose problem (name `elem` words problem)
+        other -> assertFailure ("expected one problem with " ++ name ++ ", got " ++ show other)
+  -- a document that is not PDF/A has no such rule
+  assertBool (isRight (renderPdfE standardDocInfo rect (addPage Nothing >>= cmykImage)))
+  expect "DeviceCMYK" (problems "RGB " cmykImage)
+  assertEqual [] (problems "CMYK" cmykImage)
+  expect "DeviceCMYK" (problems "GRAY" cmykImage)
+  assertEqual [] (problems "RGB " rgbImage)
+  expect "DeviceRGB" (problems "CMYK" rgbImage)
+  assertEqual [] (problems "RGB " shading)
+  expect "DeviceRGB" (problems "CMYK" shading)
+  expect "DeviceRGB" (problems "GRAY" shading)
+  expect "DeviceCMYK" (problems "RGB " cmykShading)
+  assertEqual [] (problems "CMYK" cmykShading)
 
 attach :: String -> PDF ()
 attach n = () <$ embedAssociatedFile (associatedFile (T.pack n) "text/xml" (BL.fromStrict (C.pack "<x/>")))

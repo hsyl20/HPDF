@@ -67,8 +67,9 @@
    * A document that has problems is not written. A document without a
      page is a problem. The problems of a PDF/A document are: a part other
      than 2 and 3 or a conformance level other than B, a font that is not
-     embedded (a standard 14 font), an output intent that is not an RGB ICC
-     profile, a DeviceCMYK image, a text annotation (it has no appearance
+     embedded (a standard 14 font), an output intent that is not an RGB,
+     CMYK or gray ICC profile, a device colour that this profile does not
+     permit, a text annotation (it has no appearance
      stream), an embedded file without a MIME type or in a PDF/A-2
      document, and an XMP extension prefix or property name that is not an
      XML name. The link annotations of a PDF/A document get the Print flag
@@ -125,10 +126,14 @@
      not a PDF number. The library now depends on `directory`.
    * Gray and CMYK colours: `Color` has two new constructors, `Gray` and
      `Cmyk`. `fillColor` and `strokeColor` write them with the operators of
-     DeviceGray and DeviceCMYK. A PDF/A document cannot use a CMYK colour
-     (its output intent is an RGB profile): this is a problem of the
-     document. Code that matches on all the constructors of `Color` must
-     add the two cases.
+     DeviceGray and DeviceCMYK. Code that matches on all the constructors
+     of `Color` must add the two cases.
+   * PDF/A: the output intent can be a CMYK or a gray ICC profile, and no
+     longer only an RGB profile. The profile decides the device colours
+     that the document can use: RGB colours and images with an RGB
+     profile, CMYK colours and images with a CMYK profile, gray with each
+     profile. A colour, an image, a shading or a pattern in another device
+     colour space is a problem of the document.
 
 ## 1.8
 

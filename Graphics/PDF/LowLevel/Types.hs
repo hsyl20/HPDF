@@ -392,9 +392,28 @@ modifyStrict f = do
 -- | A monad where paths can be created, and where the graphics state can
 -- be set (colours, line width)
 class MonadWriter Builder m => MonadPath m where
-    -- | Record that the content has a CMYK colour.
+    -- | Record that the content uses these device colour spaces.
     -- See Note [Device colours] in Graphics.PDF.Draw
-    recordCmykColour :: m ()
+    recordDeviceColours :: DeviceColours -> m ()
+
+-- | The device colour spaces that a content uses.
+-- See Note [Device colours] in Graphics.PDF.Draw
+data DeviceColours = DeviceColours
+  { usesGray :: !Bool
+  , usesRgb :: !Bool
+  , usesCmyk :: !Bool
+  } deriving (Eq, Show)
+
+instance Semigroup DeviceColours where
+  DeviceColours a b c <> DeviceColours a' b' c' = DeviceColours (a || a') (b || b') (c || c')
+
+instance Monoid DeviceColours where
+  mempty = DeviceColours False False False
+
+grayColours, rgbColours, cmykColours :: DeviceColours
+grayColours = mempty {usesGray = True}
+rgbColours = mempty {usesRgb = True}
+cmykColours = mempty {usesCmyk = True}
 
 {-
 
