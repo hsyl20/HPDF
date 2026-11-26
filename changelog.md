@@ -170,6 +170,17 @@
      (`pdfPermissions`) is not encrypted again, unless
      `encIgnoreSourcePermissions` is True. `HPDF-Sign-Demo` also writes an
      encrypted and signed document.
+   * Incremental updates: `Graphics.PDF.File.updatePdfFile` writes the
+     bytes of a file (`PdfSource`, from `readPdfSource` or
+     `parsePdfSource`), then the new, changed and deleted objects of a new
+     `PdfFile` and a cross-reference section (a table, or a
+     cross-reference stream after a stream). The signatures of the file
+     stay valid. The objects of the update of an encrypted file are
+     encrypted with the key of the file. An update respects the
+     permission to modify the file and a DocMDP certification with no
+     changes, unless `updatePdfFileWith` ignores them (`UpdateOptions`).
+     `pdfPages` gives the pages of a file, and `isSignatureDict` tells a
+     signature dictionary.
 
 ## 1.8
 

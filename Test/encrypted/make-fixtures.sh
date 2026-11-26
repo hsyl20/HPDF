@@ -6,6 +6,8 @@ apt-get update -qq >/dev/null
 apt-get install -y -qq qpdf >/dev/null
 qpdf --version | head -1
 W=--allow-weak-crypto
+# object streams and a cross-reference stream, not encrypted (Tests.Update)
+qpdf --object-streams=generate source.pdf objstm.pdf
 qpdf $W --encrypt user owner 40 -- source.pdf r2-rc4-40.pdf
 qpdf $W --encrypt user owner 128 --use-aes=n -- source.pdf r3-rc4-128.pdf
 qpdf $W --encrypt "" owner 128 --use-aes=n -- source.pdf r3-rc4-128-empty-user.pdf

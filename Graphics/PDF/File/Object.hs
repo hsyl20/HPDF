@@ -13,12 +13,14 @@ module Graphics.PDF.File.Object
   , realToRational
   , getObject
   , resolveValue
+  , pdfPages
   , isSignatureDict
   ) where
 
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
 import qualified Data.IntMap.Strict as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map.Strict as M
 import Graphics.PDF.File.Permissions (Permissions)
 
@@ -97,6 +99,30 @@ isSignatureDict d = case (dictLookup (C.pack "ByteRange") d, dictLookup (C.pack 
 -- | An object of the file
 getObject :: PdfFile -> Int -> Maybe Object
 getObject file n = snd <$> IM.lookup n (pdfObjects file)
+
+-- | The pages of a file, in their order: the number and the generation of
+-- each page object. The pages are the leaves of the page tree (the
+-- /Pages of the catalog, then the /Kids of each node), with /Type /Page
+-- or with no /Type and no /Kids.
+-- An object of the tree is visited one time: a loop, or a node in two
+-- places, does not give more pages.
+pdfPages :: PdfFile -> [(Int, Int)]
+pdfPages file = reverse (snd (go (IS.empty, []) pages_root))
+  where
+    pages_root = case resolveValue file <$> dictLookup (C.pack "Root") (pdfTrailer file) of
+      Just (Dict catalog) -> dictLookup (C.pack "Pages") catalog
+      _ -> Nothing
+    go (visited, acc) v = case v of
+      Just (Ref n g) | not (IS.member n visited), Dict d <- resolveValue file (Ref n g) ->
+        let visited' = IS.insert n visited
+            kids = resolveValue file <$> dictLookup (C.pack "Kids") d
+        in case (dictLookup (C.pack "Type") d, kids) of
+             (Just (Name t), _) | t == C.pack "Page" -> (visited', (n, g) : acc)
+             (_, Just (Array ks)) -> foldl (\s k -> go s (Just k)) (visited', acc) ks
+             -- a leaf with no /Type is a page, as for poppler
+             (Nothing, _) -> (visited', (n, g) : acc)
+             _ -> (visited', acc)
+      _ -> (visited, acc)
 
 -- | The value that a reference gives. Another value is given as it is.
 -- A reference to an object that does not exist, or that has another
