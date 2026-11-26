@@ -198,13 +198,16 @@ data Color = Rgb !Double !Double !Double -- ^ Red, green, blue (DeviceRGB)
 -- A CMYK colour is for a printer: a reader converts it for a screen, and
 -- the result depends on the reader.
 --
--- Two parts of a document take only an RGB colour: the colour of an
--- outline, and the colour of an uncoloured pattern
--- ('Graphics.PDF.Pattern.setUncoloredFillPattern'), whose colour space is
--- [/Pattern /DeviceRGB]. There, a gray is written as an RGB colour with
--- three equal components, and a CMYK colour is converted with the simple
--- formula of PDF 32000-1, 10.3.5 (red = 1 - min 1 (cyan + black)), which
--- does not use a colour profile.
+-- The colour of an outline is always an RGB colour: PDF has no other form
+-- for it (PDF 32000-1, 12.3.3). There, a gray is written as an RGB colour
+-- with three equal components, and a CMYK colour is converted with the
+-- simple formula of PDF 32000-1, 10.3.5 (red = 1 - min 1 (cyan + black)),
+-- which does not use a colour profile.
+--
+-- The colour that paints an uncoloured pattern
+-- ('Graphics.PDF.Pattern.setUncoloredFillPattern') keeps its device colour
+-- space: the colour space of the pattern is [/Pattern /DeviceGray],
+-- [/Pattern /DeviceRGB] or [/Pattern /DeviceCMYK].
 --
 -- A shading has its own colour space ('GraySpace', 'RGBSpace',
 -- 'CMYKSpace'), with a function that gives the colours.

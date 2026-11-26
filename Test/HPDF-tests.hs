@@ -969,6 +969,23 @@ test_pdfaDeviceColours = do
   expect "DeviceRGB" (problems "GRAY" shading)
   expect "DeviceCMYK" (problems "RGB " cmykShading)
   assertEqual [] (problems "CMYK" cmykShading)
+  -- an uncoloured pattern has the device colour space of its colour
+  let patternWith colour page = do
+        p <- createUncoloredTiling 0 0 10 10 10 10 ConstantSpacing (stroke (Rectangle (0 :+ 0) (5 :+ 5)))
+        drawWithPage page $ do
+          setUncoloredFillPattern p colour
+          setUncoloredStrokePattern p colour
+          fillAndStroke (Rectangle (0 :+ 0) (100 :+ 100))
+  assertEqual [] (problems "CMYK" (patternWith (Cmyk 0 1 1 0)))
+  expect "DeviceRGB" (problems "CMYK" (patternWith (Rgb 1 0 0)))
+  expect "DeviceCMYK" (problems "RGB " (patternWith (Cmyk 0 1 1 0)))
+  assertEqual [] (problems "GRAY" (patternWith (Gray 0.5)))
+  let patternPdf colour = BL.toStrict $ renderPdf standardDocInfo {compressed = False} rect $
+        addPage Nothing >>= patternWith colour
+      written colour x = assertBoolVerbose x (C.pack x `BS.isInfixOf` patternPdf colour)
+  mapM_ (written (Cmyk 0 1 0.5 0.25)) ["[/Pattern /DeviceCMYK ]", "\n0 1 0.5 0.25  /", " scn", " SCN"]
+  mapM_ (written (Gray 0.5)) ["[/Pattern /DeviceGray ]", "\n0.5  /"]
+  mapM_ (written (Rgb 1 0 0.5)) ["[/Pattern /DeviceRGB ]", "\n1 0 0.5  /"]
 
 attach :: String -> PDF ()
 attach n = () <$ embedAssociatedFile (associatedFile (T.pack n) "text/xml" (BL.fromStrict (C.pack "<x/>")))
