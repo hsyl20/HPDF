@@ -9,6 +9,7 @@ module Graphics.PDF.File.Encrypt
   ( Encryption(..)
   , encryption
   , encryptPdfFile
+  , renderEncryptedPdfFile
   ) where
 
 import Control.Monad (unless, when)
@@ -16,6 +17,7 @@ import Control.Monad.State.Strict (State, evalState)
 import Crypto.Random (ChaChaDRG, MonadRandom)
 import qualified Data.ByteString as S
 import qualified Data.ByteString.Char8 as C
+import qualified Data.ByteString.Lazy as L
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as M
 import qualified Data.Text as T
@@ -25,6 +27,7 @@ import Graphics.PDF.File.Crypt (aes256Decryptor, encryptObject)
 import Graphics.PDF.File.Filter (decodeStream)
 import Graphics.PDF.File.Object
 import Graphics.PDF.File.Permissions
+import Graphics.PDF.File.Write (Packed(..), RenderOptions(..), infoObject, objectStreamsPossible, packObjects, renderPacked, renderPdfFileWith)
 
 -- | The encryption of a document
 data Encryption = Encryption
@@ -68,6 +71,12 @@ encryption user owner = Encryption user owner allPermissions False
 --
 -- The random bytes come from a ChaCha generator, with a seed from the
 -- 'MonadRandom': the encryption of the objects is then pure.
+--
+-- 'renderEncryptedPdfFile' puts the objects in object streams before the
+-- encryption: then each object stream is encrypted, and the objects in it
+-- are not. 'encryptPdfFile' gives a 'PdfFile' whose objects are already
+-- encrypted: the writer cannot put them in object streams. See Note
+-- [Object streams of the writer] in Graphics.PDF.File.Write.
 
 -- | Encrypt a file. See Note [Encryption of a file].
 --
@@ -88,10 +97,29 @@ encryption user owner = Encryption user owner allPermissions False
 -- after the encryption (see Note [Objects that are not encrypted] in
 -- Graphics.PDF.File.Crypt). The random bytes must be random: a
 -- 'MonadRandom' with a fixed seed gives the same key to all the files.
+--
+-- The writer cannot put the objects of the result in object streams:
+-- use 'renderEncryptedPdfFile' for that.
 encryptPdfFile :: MonadRandom m => Encryption -> PdfFile -> m (Either String PdfFile)
-encryptPdfFile enc file = case check of
+encryptPdfFile enc file = fmap packedFile <$> encrypt_with (\f -> Packed f IM.empty) enc file
+
+-- | Encrypt a file and give its bytes, with the options of the writer.
+-- With 'renderObjectStreams', the objects are in object streams, and the
+-- object streams are encrypted (not for a file whose object numbers are
+-- too large: see Note [Object streams of the writer] in
+-- Graphics.PDF.File.Write). 'Left' for the cases of 'encryptPdfFile'.
+-- See Note [Encryption of a file]
+renderEncryptedPdfFile :: MonadRandom m => RenderOptions -> Encryption -> PdfFile -> m (Either String L.ByteString)
+renderEncryptedPdfFile options enc file
+  | renderObjectStreams options && objectStreamsPossible file = fmap renderPacked <$> encrypt_with packObjects enc file
+  | otherwise = fmap (renderPdfFileWith options . packedFile) <$> encrypt_with (\f -> Packed f IM.empty) enc file
+
+-- | Check a file, put its objects in object streams (or not) with the
+-- first argument, then encrypt it
+encrypt_with :: MonadRandom m => (PdfFile -> Packed) -> Encryption -> PdfFile -> m (Either String Packed)
+encrypt_with pack enc file = case check of
   Left e -> return (Left e)
-  Right () -> evalState (encrypt_file enc file) <$> newGenerator
+  Right () -> evalState (encrypt_file pack enc file) <$> newGenerator
   where
     check = do
       when (T.null (encOwnerPassword enc)) $ Left "the owner password cannot be empty"
@@ -129,8 +157,8 @@ is_pdfa file = case resolveValue file <$> dictLookup (C.pack "Root") (pdfTrailer
       _ -> False
 
 -- See Note [Encryption of a file]
-encrypt_file :: Encryption -> PdfFile -> State ChaChaDRG (Either String PdfFile)
-encrypt_file enc file = do
+encrypt_file :: (PdfFile -> Packed) -> Encryption -> PdfFile -> State ChaChaDRG (Either String Packed)
+encrypt_file pack enc file = do
   key <- randomBytes 32
   user_validation <- randomBytes 8
   user_key_salt <- randomBytes 8
@@ -155,28 +183,18 @@ encrypt_file enc file = do
         , (C.pack "StmF", Name (C.pack "StdCF")), (C.pack "StrF", Name (C.pack "StdCF"))
         , (C.pack "O", String o), (C.pack "U", String u), (C.pack "OE", String oe), (C.pack "UE", String ue)
         , (C.pack "P", Integer p), (C.pack "Perms", String perms), (C.pack "EncryptMetadata", Bool True) ]
-      prepared = with_extension (with_info_object file)
+      Packed prepared in_streams = pack (with_extension (infoObject file))
       trailer = pdfTrailer prepared
       with_id = if M.member (C.pack "ID") trailer then trailer
                 else M.insert (C.pack "ID") (Array [String new_id, String new_id]) trailer
   objects <- IM.traverseWithKey (\n (g, obj) -> fmap (\x -> (g, x)) <$> encryptObject (randomBytes 16) (aes256Decryptor key) n g obj)
                                 (pdfObjects prepared)
-  return $ (\os -> prepared
+  return $ (\os -> Packed prepared
     { pdfVersion = max (1, 7) (pdfVersion prepared)
     , pdfTrailer = M.insert (C.pack "Encrypt") (Dict encrypt_dict) with_id
     , pdfObjects = os
     , pdfPermissions = Nothing
-    }) <$> sequence objects
-
--- | A trailer /Info that is a dictionary becomes an object.
--- See Note [Encryption of a file]
-with_info_object :: PdfFile -> PdfFile
-with_info_object file = case M.lookup (C.pack "Info") (pdfTrailer file) of
-  Just (Dict info) ->
-    let n = maybe 1 ((+ 1) . fst) (IM.lookupMax (pdfObjects file))
-    in file { pdfTrailer = M.insert (C.pack "Info") (Ref n 0) (pdfTrailer file)
-            , pdfObjects = IM.insert n (0, Plain (Dict info)) (pdfObjects file) }
-  _ -> file
+    } in_streams) <$> sequence objects
 
 -- | The extension level 8 of Adobe in the catalog of a file before PDF 2.0.
 -- An extension of Adobe of a level of 8 or more stays. In PDF 2.0, the

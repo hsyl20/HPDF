@@ -32,6 +32,9 @@ module Graphics.PDF.Encryption
   , allPermissions
   , noPermissions
   , encryptPdf
+  , encryptPdfWith
+  , RenderOptions(..)
+  , defaultRenderOptions
   ) where
 
 import Crypto.Random (MonadRandom)
@@ -39,11 +42,12 @@ import qualified Data.ByteString.Lazy as L
 import Graphics.PDF.File.Encrypt
 import Graphics.PDF.File.Parse (parsePdfFile)
 import Graphics.PDF.File.Permissions
-import Graphics.PDF.File.Write (renderPdfFile)
+import Graphics.PDF.File.Write (RenderOptions(..), defaultRenderOptions)
 
--- | Encrypt a rendered document. The objects of the document keep their
--- numbers, and the /Info of the trailer becomes a new object; the file has
--- one cross-reference table (see 'Graphics.PDF.File.renderPdfFile').
+-- | Encrypt a rendered document, with 'defaultRenderOptions': the
+-- objects that are not streams are in object streams. The objects of the
+-- document keep their numbers, and the /Info of the trailer becomes a new
+-- object.
 --
 -- The input can be another PDF file. An encrypted file is read if its
 -- user password is empty, and it is then encrypted with the new
@@ -55,6 +59,11 @@ import Graphics.PDF.File.Write (renderPdfFile)
 -- password that is the user password, a password that is not printable
 -- ASCII, a PDF/A document, restricted permissions, a signed document.
 encryptPdf :: MonadRandom m => Encryption -> L.ByteString -> m (Either String L.ByteString)
-encryptPdf enc doc = case parsePdfFile (L.toStrict doc) of
+encryptPdf = encryptPdfWith defaultRenderOptions
+
+-- | Encrypt a rendered document, with the options of the writer (see
+-- 'Graphics.PDF.File.renderEncryptedPdfFile')
+encryptPdfWith :: MonadRandom m => RenderOptions -> Encryption -> L.ByteString -> m (Either String L.ByteString)
+encryptPdfWith options enc doc = case parsePdfFile (L.toStrict doc) of
   Left e -> return (Left e)
-  Right file -> fmap renderPdfFile <$> encryptPdfFile enc file
+  Right file -> renderEncryptedPdfFile options enc file

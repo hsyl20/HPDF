@@ -17,6 +17,7 @@ import qualified Tests.PdfFile
 import qualified Tests.Encryption
 import qualified Tests.Update
 import qualified Tests.Repair
+import qualified Tests.ObjectStreams
 
 main :: IO ()
 main = defaultMain $ testGroup "HPDF"
@@ -34,4 +35,5 @@ main = defaultMain $ testGroup "HPDF"
   , Tests.Encryption.tests
   , Tests.Update.tests
   , Tests.Repair.tests
+  , Tests.ObjectStreams.tests
   ]

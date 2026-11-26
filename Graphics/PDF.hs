@@ -145,10 +145,14 @@ import Control.Exception (IOException, catch, onException)
 import System.Directory (removeFile)
 import System.IO (IOMode(WriteMode), hClose, withBinaryFile)
 import Graphics.PDF.LowLevel.Signature (setByteRange)
+import qualified Graphics.PDF.File.Object as F
+import qualified Graphics.PDF.File.Lexer as F (parseValue, runParser, valueWith)
+import qualified Graphics.PDF.File.Write as F (renderPdfFile)
 import Data.Word (Word64, Word8)
 import Data.List (sortOn)
 import qualified Data.Set as Set
 import qualified Data.ByteString as S
+import qualified Data.ByteString.Char8 as S8
 import Control.Monad.Writer (tell)
 import qualified Data.ByteString.Lazy.Char8 as LC
 
@@ -666,12 +670,91 @@ buildPdfE s
   | otherwise =
       let ((root, info), s') = stepPDF saveObjects s
       in case documentProblems s' of
-           [] -> Right (renderDocument root info s')
+           [] -> Right (render_document root info s')
            ps -> Left ps
+
+-- | Render a document that has no problems.
+-- See Note [Object streams of a document]
+render_document :: PDFReference PDFCatalog -> Maybe (PDFReference PDFDictionary) -> PdfBuilder -> B.ByteString
+render_document root info s
+  | objectStreams (docInfo s) && compressed (docInfo s)
+  , Right file <- document_file root info s = F.renderPdfFile file
+  | otherwise = renderDocument root info s
+
+-- Note [Object streams of a document]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- With 'objectStreams' and 'compressed' (the default), the objects of a
+-- document that are not streams are in object streams, and the document
+-- has a cross-reference stream (an object stream is compressed, and a
+-- document that is not compressed is for a person to read): see Note
+-- [Object streams of the writer] in Graphics.PDF.File.Write.
+--
+-- 'document_file' makes a 'F.PdfFile' from the objects of the builder,
+-- and the writer of Graphics.PDF.File writes it. Thus one writer makes
+-- the object streams, also for the encryption
+-- ('Graphics.PDF.Encryption.encryptPdf'). Each object is rendered alone,
+-- and the lexer of Graphics.PDF.File reads it again:
+--
+-- * the data of a stream is not read: it is the bytes between
+--   "\nstream\n" and "\nendstream" ('PDFStream');
+-- * the nesting of the values has no depth limit: the builder makes the
+--   values, and a deep nesting is correct (nested functions);
+-- * the /Length objects of the streams are not in the file: the writer
+--   gives each stream a direct /Length.
+--
+-- The lexer cannot read a number of more than 255 digits (Note [Limits
+-- of the reader] in Graphics.PDF.File.Parse), and the builder writes a
+-- real of 1e255 or more with all its digits. Such a document keeps its
+-- cross-reference table.
+
+-- | The document of a builder, as the objects of a PDF file.
+-- See Note [Object streams of a document]
+document_file :: PDFReference PDFCatalog -> Maybe (PDFReference PDFDictionary) -> PdfBuilder -> Either String F.PdfFile
+document_file root info s = do
+  objs <- IM.traverseWithKey file_object (IM.withoutKeys (objects s) length_objects)
+  trailer <- F.parseValue (B.toStrict (toLazyByteString (toPDF (PDFTrailer 0 root trailer_info))))
+  case trailer of
+    F.Dict d -> Right (F.PdfFile version (M.delete (S8.pack "Size") d) objs Nothing)
+    _ -> Left "the trailer is not a dictionary"
+ where
+  version = maybe (1, 5) (const (1, 7)) (pdfaSettings s)
+  length_objects = IS.fromList [ n | o <- IM.elems (objects s), Just (_, PDFReference n) <- [pdfLengthInfo o] ]
+  trailer_info = case info of
+    Nothing -> InlineInfo (docInfo s)
+    Just i -> ArchiveInfo i (documentId (toLazyByteString (mconcat (encoded_objects s))))
+  file_object k o = either (\e -> Left ("object " ++ show k ++ ": " ++ e)) (Right . (,) 0) (object_of (B.toStrict (toLazyByteString (toPDF o))))
+  object_of bytes = do
+    (v, end) <- F.runParser (F.valueWith maxBound) bytes 0
+    let start = end + S.length stream_start
+        size = S.length bytes - start - S.length stream_end
+    case v of
+      F.Dict d
+        | stream_start `S.isPrefixOf` S.drop end bytes, stream_end `S.isSuffixOf` bytes, size >= 0 ->
+            Right (F.Stream (M.insert (S8.pack "Length") (F.Integer (fromIntegral size)) d) (S.take size (S.drop start bytes)))
+      _ | end == S.length bytes -> Right (F.Plain v)
+        | otherwise -> Left "data after the value"
+  stream_start = S8.pack "\nstream\n"
+  stream_end = S8.pack "\nendstream"
 
 -- | The message of the exception raised for a document that has problems.
 problemsMessage :: [String] -> String
 problemsMessage ps = intercalate "\n" ("HPDF: the document cannot be rendered:" : map ("  " ++) ps)
+
+-- | The objects of a document, each with its number, and the /Length
+-- objects of the streams.
+encoded_objects :: PdfBuilder -> [Builder]
+encoded_objects s = snd (mapAccumL encodeAnObject objs (IM.keys objs))
+ where
+  objs = objects s
+  objectEncoding (x,a) = toPDF . PDFReferencedObject (fromIntegral $! x) $ a
+  encodeAnObject im k = case IM.lookup k im of
+    -- 'k' is a key of 'objs', and no object is removed
+    Nothing -> (im, mempty)
+    Just o ->
+      let mim = do
+              (l, PDFReference ref) <- pdfLengthInfo o
+              return $ IM.insert ref (AnyPdfObject (KnownLength l)) im
+      in (fromMaybe im mim, objectEncoding (k,o))
 
 -- | Render the objects of a complete document
 renderDocument :: PDFReference PDFCatalog -> Maybe (PDFReference PDFDictionary) -> PdfBuilder -> B.ByteString
@@ -680,23 +763,12 @@ renderDocument root info s =
             -- PDF/A: a comment line of four bytes above 127 after the header
             Just _ -> fromLazyByteString (LC.pack "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n")
             Nothing -> serialize "%PDF-1.5\n"
-          objectEncoding (x,a) = toPDF . PDFReferencedObject (fromIntegral $! x) $ a
           objs = objects s
-          encodeAnObject im k = case IM.lookup k im of
-            -- 'k' is a key of 'objs', and no object is removed
-            Nothing -> (im, mempty)
-            Just o ->
-              let mim = do
-                      (l, PDFReference ref) <- pdfLengthInfo o
-                      return $ IM.insert ref (AnyPdfObject (KnownLength l)) im
-              in (fromMaybe im mim, objectEncoding (k,o))
-
-          encodedObjects = snd $ mapAccumL encodeAnObject objs (IM.keys objs)
-          objectContents = header : encodedObjects
+          objectContents = header : encoded_objects s
           (_nb, _len, _toc) = writeObjectsAndCreateToc objectContents
           trailerInfo = case info of
             Nothing -> InlineInfo (docInfo s)
-            Just i -> ArchiveInfo i (documentId (toLazyByteString (mconcat encodedObjects)))
+            Just i -> ArchiveInfo i (documentId (toLazyByteString (mconcat (encoded_objects s))))
           rendered = generateStreams root trailerInfo 0 0 [] objectContents
           -- offset of an object in the document
           offsetOf k = sum [ B.length (toLazyByteString o)

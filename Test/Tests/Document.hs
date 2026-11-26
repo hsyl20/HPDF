@@ -11,6 +11,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef
+import Control.Monad (forM_)
 
 tests :: TestTree
 tests = testGroup "Document"
@@ -147,12 +148,22 @@ test_documentWithoutPage :: IO ()
 test_documentWithoutPage =
   assertEqual (Left ["the document has no page"]) (renderPdfE standardDocInfo (PDFRect 0 0 300 200) (return ()))
 
--- A document that does not ask for PDF/A is written as before: PDF 1.5,
--- the Info dictionary in the trailer, no /ID.
+-- A document that does not ask for PDF/A: PDF 1.5, no /ID. With
+-- 'objectStreams' (the default): object streams, a cross-reference stream
+-- and an /Info object. Without it, or without 'compressed': the Info
+-- dictionary in the trailer and a cross-reference table, as before.
+-- See Note [Object streams of a document] in Graphics.PDF
 test_plainDocumentUnchanged :: IO ()
 test_plainDocumentUnchanged = do
-  let pdf = BL.toStrict $ renderPdf standardDocInfo (PDFRect 0 0 300 200) (addPage Nothing >> return ())
-  assertBool (C.pack "%PDF-1.5\n" `BS.isPrefixOf` pdf)
-  assertBool (C.pack "/Info <<" `BS.isInfixOf` pdf)
-  assertBool (not (C.pack "/ID [" `BS.isInfixOf` pdf))
-  assertBool (not (C.pack "/Metadata" `BS.isInfixOf` pdf))
+  let render info = BL.toStrict $ renderPdf info (PDFRect 0 0 300 200) (addPage Nothing >> return ())
+      has pdf x = C.pack x `BS.isInfixOf` pdf
+  forM_ [render standardDocInfo, render standardDocInfo {objectStreams = False}, render standardDocInfo {compressed = False}] $ \pdf -> do
+    assertBool (C.pack "%PDF-1.5\n" `BS.isPrefixOf` pdf)
+    assertBool (not (has pdf "/ID ["))
+    assertBool (not (has pdf "/Metadata"))
+  let compact = render standardDocInfo
+  assertBool (all (has compact) ["/Type /ObjStm", "/Type /XRef", "/Info "])
+  assertBool (not (any (has compact) ["\nxref\n", "/Info <<", "/Type /Catalog"]))
+  forM_ [render standardDocInfo {objectStreams = False}, render standardDocInfo {compressed = False}] $ \pdf -> do
+    assertBool (all (has pdf) ["\nxref\n", "/Info <<", "/Type /Catalog"])
+    assertBool (not (any (has pdf) ["/ObjStm", "/XRef"]))

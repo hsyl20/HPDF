@@ -10,6 +10,7 @@ import qualified Graphics.PDF as P
 import qualified Graphics.PDF.Archive as A
 import Control.Exception (evaluate)
 import qualified Data.IntMap.Strict as IM
+import qualified Data.IntSet as IS
 import qualified Data.Text as T
 import qualified Codec.Compression.Zlib as Zlib
 import qualified Data.ByteString as BS
@@ -18,6 +19,7 @@ import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as M
 import Data.Either (isLeft)
+import GHC.Stack (HasCallStack)
 
 -- | The reader with no repair: these tests are for the cross-reference
 -- sections. See Note [Repair of a file] in Graphics.PDF.File.Parse
@@ -333,21 +335,51 @@ expectedDocument file = do
   assertEqual Nothing (F.dictLookup "Size" (F.pdfTrailer file))
 
 -- | Read a file, write it, read it again: the same objects, and the same
--- bytes when the second file is written
+-- bytes when the second file is written. With a cross-reference table,
+-- and with object streams (then the version is 1.5 at least, and a /Info
+-- dictionary is an object).
 roundTrip :: BS.ByteString -> IO F.PdfFile
 roundTrip bytes = case F.parsePdfFile bytes of
   Left e -> assertFailure e
   Right p1 -> do
-    let b2 = BL.toStrict (F.renderPdfFile p1)
+    let b2 = BL.toStrict (F.renderPdfFileWith tableOptions p1)
     case F.parsePdfFile b2 of
       Left e -> assertFailure ("the written file cannot be read: " ++ e)
       Right p2 -> do
         assertEqual p1 p2
-        assertEqual b2 (BL.toStrict (F.renderPdfFile p2))
+        assertEqual b2 (BL.toStrict (F.renderPdfFileWith tableOptions p2))
         assertBool ("xref\n" `BS.isInfixOf` b2)
         assertBool (not ("/ObjStm" `BS.isInfixOf` b2))
         assertBool (not ("/XRef" `BS.isInfixOf` b2))
-        return p1
+    let b3 = BL.toStrict (F.renderPdfFile p1)
+    case F.parsePdfFile b3 of
+      Left e -> assertFailure ("the written file with object streams cannot be read: " ++ e)
+      Right p3 -> do
+        assertSameFile p1 p3
+        assertEqual b3 (BL.toStrict (F.renderPdfFile p3))
+        assertBool ("/Type /XRef" `BS.isInfixOf` b3)
+        assertBool (not ("\nxref\n" `BS.isInfixOf` b3))
+        assertBool (not ("\ntrailer" `BS.isInfixOf` b3))
+    return p1
+
+-- | The options of the writer for a cross-reference table
+tableOptions :: F.RenderOptions
+tableOptions = F.defaultRenderOptions { F.renderObjectStreams = False }
+
+-- | The file that the writer gives with object streams has the objects of
+-- the first file. Its version is 1.5 at least, and its /Info is an object.
+-- See Note [Object streams of the writer] in Graphics.PDF.File.Write
+assertSameFile :: HasCallStack => F.PdfFile -> F.PdfFile -> IO ()
+assertSameFile p1 p2 = do
+  assertEqual (max (1, 5) (F.pdfVersion p1)) (F.pdfVersion p2)
+  let info p = F.resolveValue p <$> M.lookup "Info" (F.pdfTrailer p)
+      new_info = case (M.lookup "Info" (F.pdfTrailer p1), M.lookup "Info" (F.pdfTrailer p2)) of
+        (Just (F.Dict _), Just (F.Ref n _)) -> IM.delete n
+        _ -> id
+  assertEqual (info p1) (info p2)
+  assertEqual (M.delete "Info" (F.pdfTrailer p1)) (M.delete "Info" (F.pdfTrailer p2))
+  assertEqual (F.pdfObjects p1) (new_info (F.pdfObjects p2))
+  assertEqual (F.pdfPermissions p1) (F.pdfPermissions p2)
 
 -- The entries of a cross-reference table can end with " \n", " \r" or
 -- "\r\n".
@@ -358,7 +390,7 @@ test_classicFiles = do
   let file = classicFile " \n" (take 3 documentObjects ++ [(4, 2, "<< /Length 11 >>\nstream\n0 0 m 1 1 l\nendstream")]) ""
   p <- roundTrip file
   assertEqual (Just 2) (fst <$> IM.lookup 4 (F.pdfObjects p))
-  assertBool (" 00002 n \n" `BS.isInfixOf` BL.toStrict (F.renderPdfFile p))
+  assertBool (" 00002 n \n" `BS.isInfixOf` BL.toStrict (F.renderPdfFileWith tableOptions p))
 
 -- Note [Order of the cross-reference sections] in Graphics.PDF.File.Parse
 test_incrementalUpdate :: IO ()
@@ -723,19 +755,44 @@ test_hpdfDocuments = withTestFont $ \_ ttf -> do
               _ <- A.embedAssociatedFile (A.associatedFile (T.pack "a.xml") "text/xml" (BL.fromStrict "<x/>"))
               page <- P.addPage Nothing
               P.drawWithPage page (P.drawText (P.text (P.PDFFont font 12) 10 150 (T.pack "PDF/A")))) ]
-  mapM_ (\(name, info, doc) -> case P.renderPdfE info rect doc of
-          Left ps -> assertFailure (name ++ ": " ++ unlines ps)
-          Right bytes -> do
+  mapM_ (\(name, info, doc) -> case (P.renderPdfE info { P.objectStreams = False } rect doc, P.renderPdfE info rect doc) of
+          (Right bytes, Right compact) -> do
             let original = BL.toStrict bytes
             p <- roundTrip original
             -- the same number of objects as the table of HPDF ("0 n")
             let count = maybe 0 fst (C.readInt (BS.drop 8 (snd (BS.breakSubstring "\nxref\n0 " original))))
             assertEqual (name, count - 1) (name, IM.size (F.pdfObjects p))
+            -- the document with object streams has the same objects
+            -- (not when it is not compressed: Note [Object streams of a
+            -- document] in Graphics.PDF)
+            p' <- either assertFailure return (F.parsePdfFile (BL.toStrict compact))
+            if P.compressed info
+              then do
+                -- the /Length objects of the builder are not written
+                let dead = IM.difference (F.pdfObjects p) (F.pdfObjects p')
+                    -- the reader gives each stream a direct /Length:
+                    -- the references are in the bytes
+                    lengths = [ n | piece <- drop 1 (split_on "/Length " original), Just (n, rest) <- [C.readInt piece]
+                                  , " 0 R" `BS.isPrefixOf` rest ]
+                assertEqual (name, IS.fromList lengths) (name, IM.keysSet dead)
+                assertBoolVerbose name (not (IM.null dead))
+                assertSameFile p { F.pdfObjects = IM.difference (F.pdfObjects p) dead } p'
+                assertBoolVerbose name ("/Type /ObjStm" `BS.isInfixOf` BL.toStrict compact)
+                assertBoolVerbose name (BL.length compact < BL.length bytes)
+              else assertEqual bytes compact
             -- the content of the page has its operators
             let contents = [ d | (_, (_, F.Stream dict raw)) <- IM.toList (F.pdfObjects p)
                                , Right d <- [F.decodeStream 1000000 dict raw] ]
-            assertBoolVerbose name (any (\d -> " re" `BS.isInfixOf` d || " l" `BS.isInfixOf` d || "Tf" `BS.isInfixOf` d || " Do" `BS.isInfixOf` d) contents))
+            assertBoolVerbose name (any (\d -> " re" `BS.isInfixOf` d || " l" `BS.isInfixOf` d || "Tf" `BS.isInfixOf` d || " Do" `BS.isInfixOf` d) contents)
+          (Left ps, _) -> assertFailure (name ++ ": " ++ unlines ps)
+          (_, Left ps) -> assertFailure (name ++ ": " ++ unlines ps))
         documents
+
+-- | The pieces of a byte string between the separators
+split_on :: BS.ByteString -> BS.ByteString -> [BS.ByteString]
+split_on sep bytes = case BS.breakSubstring sep bytes of
+  (piece, rest) | BS.null rest -> [piece]
+                | otherwise -> piece : split_on sep (BS.drop (BS.length sep) rest)
 
 -- The attacks of known CVEs of other PDF readers. Each file must give
 -- Left, or the correct objects, in a short time (the test has a timeout).

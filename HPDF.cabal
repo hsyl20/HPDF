@@ -72,6 +72,7 @@ Test-Suite HPDF-Tests
                      Tests.Encryption
                      Tests.Update
                      Tests.Repair
+                     Tests.ObjectStreams
                      Tests.Signature
                      Tests.TrueType
                      Tests.Typesetting

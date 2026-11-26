@@ -641,6 +641,11 @@ data PDFDocumentInfo = PDFDocumentInfo {
                    , pageLayout :: PDFDocumentPageLayout
                    , viewerPreferences :: PDFViewerPreferences
                    , compressed :: Bool
+                   , objectStreams :: Bool
+                     -- ^ Object streams and a cross-reference stream (PDF
+                     -- 1.5): a smaller file. Only with 'compressed'. True by
+                     -- default. See Note [Object streams of a document] in
+                     -- Graphics.PDF
                    }
 
 

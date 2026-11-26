@@ -147,8 +147,15 @@ AES-128 and AES-256. A file whose cross-reference is not correct is
 repaired: the reader finds the objects with a scan of the file.
 `HPDF-Rewrite-Demo` (Test/rewrite.hs) reads a file and writes it again.
 
+The writer puts the objects that are not streams in object streams, with
+a cross-reference stream (PDF 1.5): the file is smaller. The documents of
+the builder have them too. A reader of PDF 1.4 needs a cross-reference
+table: `F.renderPdfFileWith F.defaultRenderOptions { F.renderObjectStreams = False }`,
+or `standardDocInfo { objectStreams = False }` for the builder.
+
 `F.updatePdfFile` writes an incremental update: the bytes of the file,
-then only the objects that changed and a new cross-reference section.
+then only the objects that changed and a new cross-reference section
+(with object streams when the file has a cross-reference stream).
 The signatures of the file thus stay valid, and the objects of the update
 of an encrypted file are encrypted with the key of the file:
 
