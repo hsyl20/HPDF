@@ -179,6 +179,7 @@ library
   Other-Modules:
      Graphics.PDF.LowLevel.Types
      Graphics.PDF.LowLevel.Hash
+     Graphics.PDF.LowLevel.Inflate
      Graphics.PDF.LowLevel.PNG
      Graphics.PDF.LowLevel.Signature
      Graphics.PDF.LowLevel.CMS
