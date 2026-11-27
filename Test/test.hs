@@ -158,6 +158,38 @@ patternTest page = do
            strokeColor (Rgb 0 0 1)
            stroke (Ellipse 0 0 100 50) 
            
+-- | Layers: a grid, a watermark that is printed only, a detail for the
+-- zoom, the same text in two languages, and a condition
+testLayers :: AnyFont -> PDFReference PDFPage -> PDF ()
+testLayers font p = do
+    grid <- createLayer "Grid" defaultLayerOptions
+    hidden <- createLayer "Hidden" defaultLayerOptions {layerVisible = False}
+    watermark <- createLayer "Watermark" defaultLayerOptions {layerVisible = False, layerPrint = Just True}
+    detail <- createLayer "Detail" defaultLayerOptions {layerZoom = Just (2, Nothing)}
+    english <- createLayer "English" defaultLayerOptions {layerLanguage = Just (LayerLanguage "en" True)}
+    french <- createLayer "Fran\231ais" defaultLayerOptions {layerVisible = False, layerLanguage = Just (LayerLanguage "fr" False)}
+    both <- createLayerCondition (LayerAnd [LayerOn grid, LayerOn detail])
+    setLayerPanel [ LayerLabel "Languages" [LayerEntry english [], LayerEntry french []]
+                  , LayerEntry grid [LayerEntry detail []], LayerEntry hidden [], LayerEntry watermark [] ]
+    addRadioGroup [english, french]
+    addLayerConfig (layerConfig "French") {configVisible = [grid, french], configRadioGroups = [[english, french]]}
+    drawWithPage p $ do
+      drawText $ text (PDFFont font 14) 10 380 "Layers"
+      -- a layer does not save the graphics state: 'withNewContext' does
+      inLayer grid $ withNewContext $ do
+        strokeColor (Rgb 0.6 0.6 0.6)
+        mapM_ (\x -> stroke (Line x 50 x 350)) [50, 100 .. 550]
+        mapM_ (\y -> stroke (Line 50 y 550 y)) [50, 100 .. 350]
+      inLayer hidden $ withNewContext $ do
+        fillColor red
+        fill (Circle 300 200 40)
+      inLayer watermark $ withNewContext $ do
+        fillColor (Rgb 0.8 0.8 0.8)
+        drawText $ text (PDFFont font 48) 150 150 "PRINTED COPY"
+      inLayer both $ drawText $ text (PDFFont font 2) 52 52 "a small detail of the grid"
+      inLayer english $ drawText $ text (PDFFont font 12) 60 360 "Hello"
+      inLayer french $ drawText $ text (PDFFont font 12) 60 360 "Bonjour"
+
 testAnnotation :: AnyFont -> PDFReference PDFPage -> PDF ()
 testAnnotation timesRoman p = do
     drawWithPage p $ do
@@ -787,7 +819,10 @@ testAll timesRoman timesBold helveticaBold symbol zapf jpg = do
         textBoxes timesRoman
     page14 <- addPage Nothing
     rawImage page14
-    
+    page15 <- addPage Nothing
+    newSection "Layers" Nothing Nothing $ do
+      testLayers timesRoman page15
+
 main :: IO()
 main = do
     let rect = PDFRect 0 0 600 400

@@ -77,11 +77,17 @@ document fontData icc = do
   _ <- embedAssociatedFile (associatedFile "greetings.csv" "text/csv" greetings)
          { afRelationship = Data, afDescription = "The greetings on the page" }
   font <- mkTrueTypeFont fontData
+  -- Layers: PDF/A permits them, but not their usage (zoom, print, ...)
+  greek <- createLayer "Greek" defaultLayerOptions
+  russian <- createLayer "Russian" defaultLayerOptions {layerVisible = False}
+  addLayerConfig (layerConfig "Russian only") {configVisible = [russian]}
   page <- addPage Nothing
   drawWithPage page $ do
     drawText $ text (PDFFont font 16) 24 166 "PDF/A-3b in HPDF"
     drawText $ text (PDFFont font 10) 24 140 "This document embeds greetings.csv:"
-    drawText $ text (PDFFont font 10) 40 120 "Bonjour · Γειά σου · Привет"
+    drawText $ text (PDFFont font 10) 40 120 "Bonjour"
+    inLayer greek $ drawText $ text (PDFFont font 10) 100 120 "Γειά σου"
+    inLayer russian $ drawText $ text (PDFFont font 10) 160 120 "Привет"
     drawText $ text (PDFFont font 9) 24 24 "Every font is embedded; the metadata says PDF/A-3, conformance B."
     -- A link annotation. In a PDF/A document it gets the Print flag (/F 4)
     drawText $ text (PDFFont font 9) 24 44 "A link to the top of this page"

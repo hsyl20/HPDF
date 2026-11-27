@@ -125,6 +125,32 @@ opened with the user password (`pdfPermissions`), and does not apply
 them; `encryptPdf` does not encrypt again a file with restricted
 permissions, unless `encIgnoreSourcePermissions` is True.
 
+## Layers
+
+`Graphics.PDF.OptionalContent` (also exported by `Graphics.PDF`) puts
+content in layers that the user can show or hide:
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+doc = do
+  grid <- createLayer "Grid" defaultLayerOptions
+  -- not visible on the screen, but printed
+  watermark <- createLayer "Watermark" defaultLayerOptions { layerVisible = False, layerPrint = Just True }
+  page <- addPage Nothing
+  drawWithPage page $ do
+    inLayer grid $ stroke (Line 0 0 100 100)
+    inLayer watermark $ drawText (text font 20 20 "COPY")
+```
+
+`layerXObject` puts an image or a form in a layer everywhere it is drawn.
+A layer can also be visible only for some magnifications (`layerZoom`),
+for a language (`layerLanguage`), or when the document is exported
+(`layerExport`). A condition on layers (`createLayerCondition`), the
+layer panel (`setLayerPanel`), radio groups (`addRadioGroup`) and other
+configurations (`addLayerConfig`) are also available. Acrobat applies
+all the usages; poppler applies none, and Ghostscript applies the
+printing.
+
 ## Reading a PDF file
 
 `Graphics.PDF.File` reads an existing PDF file into values, and writes it

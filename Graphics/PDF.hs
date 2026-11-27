@@ -71,6 +71,8 @@ module Graphics.PDF
   , module Graphics.PDF.Shading
   -- ** Transparency
   , module Graphics.PDF.Transparency
+  -- ** Layers
+  , module Graphics.PDF.OptionalContent
   , ColorSpace(..)
   , calculator1
   , calculator2
@@ -132,7 +134,9 @@ import Graphics.PDF.Resources(emptyResource, PDFResource(..))
 import Data.Binary.Builder(Builder,fromLazyByteString, toLazyByteString)
 import Graphics.PDF.LowLevel.Serializer
 import Data.List(intercalate, mapAccumL)
-import Data.Maybe(fromMaybe)
+import Data.Maybe(fromMaybe, isJust)
+import Graphics.PDF.OptionalContent
+import Graphics.PDF.LowLevel.Layers (optionalContentEntries, streamLayerProblems)
 import qualified Data.Text as T
 import Graphics.PDF.Fonts.Font 
 import Graphics.PDF.Fonts.StandardFont
@@ -351,6 +355,8 @@ saveObjects  = do
         , entry "DestOutputProfile" icc
         ]
       return [entry "OutputIntents" [intent]]
+  -- The layers that the streams use. See Note [Optional content] in Graphics.PDF.OptionalContent
+  gets streamLayerProblems >>= mapM_ problem
   -- Save streams to the object dictionary so that they are saved in the PDF document
   createStreams
   infos <- gets docInfo
@@ -407,9 +413,12 @@ saveObjects  = do
                 -- SignaturesExist and AppendOnly
                 , entry "SigFlags" (PDFInteger 3)
                 ]) ]
+  -- See Note [Optional content] in Graphics.PDF.OptionalContent
+  (layerProblems, layerEntries) <- gets (optionalContentEntries (isJust pdfa) . optionalContent)
+  mapM_ problem layerProblems
   -- Create the catalog
   cat <- addObject $ PDFCatalog oref pRef (pageMode infos) (pageLayout infos) (viewerPreferences infos)
-           (metadata ++ intents ++ fileEntries ++ formEntries)
+           (metadata ++ intents ++ fileEntries ++ formEntries ++ layerEntries)
   modifyStrict $ \s -> s {catalog = cat}
   return (cat, info)
  where
@@ -623,6 +632,7 @@ defaultPdfSettings =
            , signatureValues = []
            , signatureFields = []
            , documentProblems = []
+           , optionalContent = emptyOptionalContent
            }
 
 -- | Builder of a new, empty document

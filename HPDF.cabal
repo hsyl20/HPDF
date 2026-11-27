@@ -73,6 +73,7 @@ Test-Suite HPDF-Tests
                      Tests.Update
                      Tests.Repair
                      Tests.ObjectStreams
+                     Tests.OptionalContent
                      Tests.Signature
                      Tests.TrueType
                      Tests.Typesetting
@@ -196,8 +197,11 @@ library
      Graphics.PDF.Signature
      Graphics.PDF.Encryption
      Graphics.PDF.File
+     Graphics.PDF.OptionalContent
   Other-Modules:
      Graphics.PDF.LowLevel.Types
+     Graphics.PDF.LowLevel.OptionalContent
+     Graphics.PDF.LowLevel.Layers
      Graphics.PDF.LowLevel.Hash
      Graphics.PDF.LowLevel.Inflate
      Graphics.PDF.File.Object
