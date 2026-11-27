@@ -20,8 +20,13 @@ module Graphics.PDF.LowLevel.OptionalContent
   , LayerConfig(..)
   , layerConfig
   , layerHasUsage
+  , zoomProblem
+  , usageApplications
+  , conditionPolicy
+  , panelProblems
   ) where
 
+import qualified Data.Map.Strict as M
 import qualified Data.Text as T
 
 -- | The options of a layer.
@@ -75,7 +80,8 @@ data LayerItem l
   = LayerEntry l [LayerItem l]
     -- ^ A layer, with the items under it
   | LayerLabel T.Text [LayerItem l]
-    -- ^ A label that is not a layer, with the items under it
+    -- ^ A label that is not a layer, with the items under it. An empty
+    -- label is a group with no label
   deriving (Eq, Show, Functor, Foldable)
 
 -- | A condition on the states of layers.
@@ -128,3 +134,78 @@ layerHasUsage o = or
   , maybe False (const True) (layerExport o)
   , maybe False (const True) (layerLanguage o)
   ]
+
+-- | The problem of the zoom of a layer, if it has one: a minimum below 0,
+-- or a maximum that is not above the minimum (the layer is visible up to
+-- the maximum, which is not included).
+zoomProblem :: T.Text -> LayerOptions -> Maybe String
+zoomProblem name o = case layerZoom o of
+  Just (lo, hi)
+    | not (finite lo) || lo < 0 || maybe False (\h -> not (finite h) || h <= lo) hi ->
+        Just ( "the layer " ++ show name ++ " has a zoom from " ++ show lo ++ " to "
+               ++ maybe "no maximum" show hi
+               ++ "; the minimum must be 0 or more, and the maximum must be above the minimum" )
+  _ -> Nothing
+ where
+  finite x = not (isNaN x || isInfinite x)
+
+-- | The usage application dictionaries (/AS) for the usage of these
+-- layers: the event, the categories, and the layers of each dictionary.
+-- See Note [Layers set by usage] in Graphics.PDF.OptionalContent
+usageApplications :: [(l, LayerOptions)] -> [(String, [String], [l])]
+usageApplications layers =
+  [ (event, map fst used, [ l | (l, o) <- layers, any (\(_, has) -> has o) used ])
+  | (event, categories) <- events
+  , let used = [ c | c@(_, has) <- categories, any (has . snd) layers ]
+  , not (null used) ]
+ where
+  events =
+    [ ("View", [("Zoom", isJust' . layerZoom), ("Language", isJust' . layerLanguage)])
+    , ("Print", [("Print", isJust' . layerPrint)])
+    , ("Export", [("Export", isJust' . layerExport)])
+    ]
+  isJust' :: Maybe a -> Bool
+  isJust' = maybe False (const True)
+
+-- | The /P policy of a condition when the condition has one of its forms,
+-- or Nothing when it needs a visibility expression (/VE).
+-- See Note [Conditions on layers] in Graphics.PDF.OptionalContent
+conditionPolicy :: LayerExpr l -> Maybe String
+conditionPolicy e = case e of
+  LayerOn _ -> Just "AnyOn"
+  LayerNot (LayerOn _) -> Just "AllOff"
+  LayerAnd xs | not (null xs), all is_on xs -> Just "AllOn"
+  LayerOr xs | not (null xs), all is_on xs -> Just "AnyOn"
+  LayerOr xs | not (null xs), all is_off xs -> Just "AnyOff"
+  LayerAnd xs | not (null xs), all is_off xs -> Just "AllOff"
+  _ -> Nothing
+ where
+  is_on (LayerOn _) = True
+  is_on _ = False
+  is_off (LayerNot (LayerOn _)) = True
+  is_off _ = False
+
+-- | The problems of a layer panel: a layer two times, and the groups that
+-- viewers do not show as they are written. The arguments are the name of
+-- a layer and the name of the panel.
+-- See Note [Labels of the layer panel] in Graphics.PDF.OptionalContent
+panelProblems :: Ord l => (l -> String) -> String -> [LayerItem l] -> [String]
+panelProblems layer_name what panel =
+     [ what ++ " has the layer " ++ layer_name n ++ " more than one time"
+     | n <- M.keys (M.filter (> (1 :: Int)) (M.fromListWith (+) [ (x, 1) | x <- concatMap (foldr (:) []) panel ])) ]
+  ++ label_problems panel
+ where
+  group t = if T.null t then "a group with no label" else "the label " ++ show t
+  label_problems items = concat
+    [ [ what ++ " has " ++ group t ++ " immediately after the layer " ++ layer_name n
+        ++ ", which has no children: a viewer shows the group as the children of the layer"
+      | (LayerEntry n [], LayerLabel t _) <- zip items (drop 1 items) ]
+    , [ what ++ " has " ++ group t ++ " as the first child of the layer " ++ layer_name n
+        ++ ": poppler does not show the group"
+      | LayerEntry n (LayerLabel t _ : _) <- items ]
+    , [ what ++ " has " ++ group t ++ " as the first item of the group " ++ show l
+        ++ ": poppler does not show the group " ++ show l
+      | LayerLabel l (LayerLabel t _ : _) <- items ]
+    , concatMap label_problems [ kids | LayerEntry _ kids <- items ]
+    , concatMap label_problems [ kids | LayerLabel _ kids <- items ]
+    ]

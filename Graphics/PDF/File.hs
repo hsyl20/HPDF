@@ -32,6 +32,12 @@
 -- > Right bytes <- updatePdfFile source file { pdfObjects = ... }
 -- > L.writeFile "out.pdf" bytes
 --
+-- 'readLayers' gives the layers (optional content) of a file, and
+-- 'writeLayers' changes them. 'addLayer', 'putPageInLayer' and
+-- 'removeLayer' add a layer, put a page in a layer, and remove a layer
+-- with its content. See Note [Layers of a file] in
+-- Graphics.PDF.File.Layers.
+--
 -- The constructors of 'Value' have short names ('String', 'Integer'),
 -- thus this module is for a qualified import:
 --
@@ -78,6 +84,20 @@ module Graphics.PDF.File
   , renderEncryptedPdfFile
   , Encryption(..)
   , encryption
+    -- * Layers
+  , FileLayers(..)
+  , readLayers
+  , writeLayers
+  , addLayer
+  , putPageInLayer
+  , putAnnotationsInLayer
+  , removeLayer
+  , LayerOptions(..)
+  , defaultLayerOptions
+  , LayerLanguage(..)
+  , LayerItem(..)
+  , LayerConfig(..)
+  , layerConfig
     -- * Objects
   , dictLookup
   , realToRational
@@ -101,6 +121,10 @@ import Graphics.PDF.File.Encrypt
 import Graphics.PDF.File.Filter
 import Graphics.PDF.File.Parse
 import Graphics.PDF.File.Lexer (parseValue, parseValueWith)
+import Graphics.PDF.File.Layers (FileLayers(..), readLayers, writeLayers, addLayer, putPageInLayer, putAnnotationsInLayer)
+import Graphics.PDF.File.LayerRemoval (removeLayer)
+import Graphics.PDF.LowLevel.OptionalContent
+  (LayerOptions(..), defaultLayerOptions, LayerLanguage(..), LayerItem(..), LayerConfig(..), layerConfig)
 import Graphics.PDF.File.Object
 import Graphics.PDF.File.Permissions
 import Graphics.PDF.File.Update

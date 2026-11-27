@@ -19,6 +19,7 @@ import qualified Tests.Update
 import qualified Tests.Repair
 import qualified Tests.ObjectStreams
 import qualified Tests.OptionalContent
+import qualified Tests.FileLayers
 
 main :: IO ()
 main = defaultMain $ testGroup "HPDF"
@@ -38,4 +39,5 @@ main = defaultMain $ testGroup "HPDF"
   , Tests.Repair.tests
   , Tests.ObjectStreams.tests
   , Tests.OptionalContent.tests
+  , Tests.FileLayers.tests
   ]
