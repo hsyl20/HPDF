@@ -213,6 +213,22 @@
      Code that makes a `PDFDocumentInfo` with its constructor, and not
      from `standardDocInfo`, must give it (a record with no value for it
      compiles with a warning, and fails when the document is rendered).
+   * Optional content (layers), `Graphics.PDF.OptionalContent`:
+     `createLayer` makes a layer and `inLayer` draws in it. A layer can
+     be hidden or locked when the document opens. A viewer can also
+     change it by itself, from the zoom, the printing, the export or the
+     language (`layerZoom`, `layerPrint`, `layerExport`,
+     `layerLanguage`). `createLayerCondition` makes the visibility depend
+     on more than one layer (an /OCMD, with /VE when it is necessary).
+     `layerAnnotation` puts an annotation in a layer, and `layerXObject`
+     an image or a form everywhere it is drawn. `setLayerPanel`,
+     `addRadioGroup` and `addLayerConfig` give the layer panel, the radio
+     groups and other configurations. A PDF/A document can have layers,
+     but not their usage. `/Locked` and `/VE` add `/Version /1.6` to the
+     catalog. A wrong use of the layers is a problem of the document
+     (`renderPdfE` gives `Left`): for example a layer that cuts a path, a
+     layer of another document, or a panel that viewers do not show as
+     it is written.
 
 ## 1.8
 

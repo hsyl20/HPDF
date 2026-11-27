@@ -53,6 +53,8 @@ import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.Coordinates
 import Graphics.PDF.Draw
 import Control.Monad.Writer
+import Control.Monad (when)
+import Control.Monad.State (gets)
 import Graphics.PDF.LowLevel.Serializer
 
 class Shape a where
@@ -90,12 +92,13 @@ instance Shape Line where
     
 data Rectangle = Rectangle !Point !Point deriving (Eq) 
 instance Shape Rectangle where
- addShape (Rectangle a b) 
-     = tell . mconcat $ [ serialize '\n'
-                        , toPDF a
-                        , serialize ' '
-                        , toPDF (b - a)
-                        , serialize " re" ]
+ addShape (Rectangle a b) = do
+     tell . mconcat $ [ serialize '\n'
+                      , toPDF a
+                      , serialize ' '
+                      , toPDF (b - a)
+                      , serialize " re" ]
+     set_path_open True
  
 data Arc = Arc PDFFloat PDFFloat PDFFloat PDFFloat deriving(Eq)
 instance Shape Arc where
@@ -204,14 +207,30 @@ setDash (DashPattern a p) =
 setNoDash :: MonadPath m => m ()
 setNoDash = setDash (DashPattern [] 0)
     
+-- | Record that a path is being built, or that it is painted. 'inLayer'
+-- must not cut a path. See Note [Optional content] in
+-- Graphics.PDF.OptionalContent
+set_path_open :: Bool -> Draw ()
+set_path_open open = do
+    current <- gets pathOpen
+    when (current /= open) $ modifyStrict $ \s -> s {pathOpen = open}
+
+-- | Write a painting operator, which ends the path
+paint :: String -> Draw ()
+paint operator = do
+    tell . serialize $ operator
+    set_path_open False
+
 -- | Begin a new path at a position
-beginPath :: Point 
+beginPath :: Point
           -> Draw ()
 beginPath = moveto
 
 -- | Close current path 
 closePath :: Draw ()
-closePath = tell . serialize $ "\nh"
+closePath = do
+    tell . serialize $ "\nh"
+    set_path_open True
 
 
 -- | Append a cubic Bezier curve to the current path. The curve extends 
@@ -230,6 +249,7 @@ addBezierCubic b c d = do
                      , toPDF d
                      , serialize " c"
                      ]
+    set_path_open True
     writeDrawST penPosition d
                     
 -- | Move pen to a given point without drawing anything
@@ -240,6 +260,7 @@ moveto a = do
                      , toPDF a
                      , serialize " m"
                      ]
+    set_path_open True
     writeDrawST penPosition a
 
 -- | Draw a line from current point to the one specified by lineto
@@ -250,6 +271,7 @@ lineto a = do
                      , toPDF a
                      , serialize " l"
                      ]
+    set_path_open True
     writeDrawST penPosition a
 
 curveto :: Point -> Point -> Point -> Draw ()
@@ -290,28 +312,28 @@ addPolygonToPath (l : ls) =  do
     
 -- | Draw current path
 strokePath :: Draw ()             
-strokePath = tell . serialize $ "\nS"
+strokePath = paint "\nS"
 
 -- | Fill current path
-fillPath :: Draw ()             
-fillPath = tell . serialize $ "\nf"
+fillPath :: Draw ()
+fillPath = paint "\nf"
 
 -- | Fill current path
-fillAndStrokePath :: Draw ()             
-fillAndStrokePath = tell . serialize $ "\nB"
+fillAndStrokePath :: Draw ()
+fillAndStrokePath = paint "\nB"
 
 -- | Set clipping path
-setAsClipPathEO :: Draw ()             
-setAsClipPathEO = tell . serialize $ "\nW* n"
+setAsClipPathEO :: Draw ()
+setAsClipPathEO = paint "\nW* n"
 
 -- | Set clipping path
-setAsClipPath :: Draw ()             
-setAsClipPath = tell . serialize $ "\nW n"
+setAsClipPath :: Draw ()
+setAsClipPath = paint "\nW n"
 
 -- | Fill current path using even odd rule
-fillPathEO :: Draw ()             
-fillPathEO = tell . serialize $ "\nf*"
+fillPathEO :: Draw ()
+fillPathEO = paint "\nf*"
 
 -- | Fill current path using even odd rule
-fillAndStrokePathEO :: Draw ()             
-fillAndStrokePathEO = tell . serialize $ "\nB*"
+fillAndStrokePathEO :: Draw ()
+fillAndStrokePathEO = paint "\nB*"

@@ -109,6 +109,10 @@ module Graphics.PDF.Draw(
  , currentMatrix
  , multiplyCurrentMatrixWith
  , PDFGlobals(..)
+ -- ** Optional content
+ , OptionalContentRef(..)
+ , OptionalContentState(..)
+ , emptyOptionalContent
  ) where
 
 #if !MIN_VERSION_base(4,8,0)
@@ -145,6 +149,7 @@ import Graphics.PDF.Resources
 import Graphics.PDF.Data.PDFTree(PDFTree)
 import qualified Data.Text as T
 import Graphics.PDF.Fonts.Font(PDFFont(..))
+import Graphics.PDF.LowLevel.OptionalContent (LayerOptions, LayerItem, LayerConfig)
 
 import Text.Printf (printf)
 
@@ -235,7 +240,31 @@ data DrawState = DrawState {
                 ,  unembeddedFonts :: Set.Set String -- ^ Names of the fonts used whose program is not in the document
                 ,  streamFont :: Maybe PDFFont -- ^ Font of the graphics state. See Note [Font of a text object] in Graphics.PDF.Text
                 ,  deviceColours :: !DeviceColours -- ^ Device colour spaces of the colour operators of the stream. See Note [Device colours]
+                ,  layerNames :: M.Map OptionalContentRef String -- ^ Names of the layers and conditions in /Properties. See Note [Optional content] in Graphics.PDF.OptionalContent
+                ,  pathOpen :: !Bool -- ^ A path is being built: its painting operator is not written yet
+                ,  streamProblems :: [String] -- ^ Problems of the stream, most recent first: they are problems of the document
                 }
+
+-- | A reference to an optional content group (a layer) or to an optional
+-- content membership dictionary (a condition), as a resource of a stream.
+newtype OptionalContentRef = OptionalContentRef Int deriving (Eq, Ord)
+
+instance PdfResourceObject OptionalContentRef where
+  toRsrc (OptionalContentRef n) = AnyPdfObject (PDFReference n :: PDFReference PDFDictionary)
+
+-- | The layers of a document, the panel, the radio groups and the
+-- configurations. See Note [Optional content] in Graphics.PDF.OptionalContent
+data OptionalContentState = OptionalContentState
+  { ocLayers :: [(Int, T.Text, LayerOptions)] -- ^ Object number, name and options of each layer, most recent first
+  , ocPanel :: Maybe [LayerItem Int] -- ^ The panel of the default configuration ('Nothing': all the layers)
+  , ocRadioGroups :: [[Int]] -- ^ Radio groups of the default configuration, most recent first
+  , ocConfigs :: [LayerConfig Int] -- ^ Alternative configurations, most recent first
+  , ocKnown :: !IS.IntSet -- ^ Object numbers of the layers and of the conditions
+  , ocVisibilityExpressions :: !Bool -- ^ A condition has a visibility expression (/VE, PDF 1.6)
+  }
+
+emptyOptionalContent :: OptionalContentState
+emptyOptionalContent = OptionalContentState [] Nothing [] [] IS.empty False
 data DrawEnvironment = DrawEnvironment {
                         streamId :: Int
                      ,  xobjectBoundD :: IM.IntMap (PDFFloat,PDFFloat)
@@ -356,8 +385,8 @@ supplyName = do
 emptyDrawState :: Int -> DrawState
 emptyDrawState ref = 
     let names = (map (("O" ++ (show ref)) ++ ) $ [replicate k ['a'..'z'] | k <- [1..]] >>= sequence) in
-    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty Set.empty Nothing mempty
-  
+    DrawState names emptyRsrc M.empty M.empty M.empty M.empty emptyDictionary []  M.empty M.empty M.empty M.empty [identity] M.empty Set.empty Nothing mempty M.empty False []
+
 -- | Execute the drawing commands to get a new state and an uncompressed PDF stream
 runDrawing :: Draw a -> DrawEnvironment -> DrawState -> (a,DrawState,BU.Builder)
 runDrawing drawing environment drawState 
@@ -407,7 +436,9 @@ withNewContext m = do
     pushMatrixStack identity
     font <- gets streamFont
     a <- m
-    modifyStrict $ \s -> s {streamFont = font}
+    -- Q ends a path that is not painted: see Note [Optional content] in
+    -- Graphics.PDF.OptionalContent
+    modifyStrict $ \s -> s {streamFont = font, pathOpen = False}
     popMatrixStack
     tell . serialize $ "\nQ"
     return a
@@ -531,6 +562,7 @@ data PdfBuilder = PdfBuilder { supplySrc :: !Int -- ^ Supply of unique identifie
                          , signatureValues :: [Int] -- ^ Signature dictionaries. See Note [Signature of a document] in Graphics.PDF.Signature
                          , signatureFields :: [Int] -- ^ Signature fields that are written
                          , documentProblems :: [String] -- ^ Why the document does not conform to what was asked of it (PDF/A), found when it is saved
+                         , optionalContent :: !OptionalContentState -- ^ Layers. See Note [Optional content] in Graphics.PDF.OptionalContent
                          }
                          
 -- | A PDF Page object
