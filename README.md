@@ -197,6 +197,25 @@ an encrypted file that the user password opened, and a DocMDP signature
 that certifies the file with no changes. `F.updatePdfFileWith` can
 ignore them.
 
+The layers of a file can be listed and changed, and a layer can be
+removed with the content that is visible only with it:
+
+```haskell
+Right layers <- return (F.readLayers file)
+-- hide all the layers
+let hidden = layers { F.fileLayers = [ (n, t, o { F.layerVisible = False }) | (n, t, o) <- F.fileLayers layers ] }
+Right file1 <- return (F.writeLayers hidden file)
+-- a new layer with the content of the first page
+Right (n, file2) <- return (F.addLayer "Page 1" F.defaultLayerOptions file1)
+Right file3 <- return (F.putPageInLayer n 0 file2)
+-- remove the first layer and its content
+Right file4 <- return (F.removeLayer F.defaultLimits (head [ m | (m, _, _) <- F.fileLayers layers ]) file3)
+```
+
+`writeLayers` writes only the objects that change, thus an update of a
+signed file keeps the signatures. `HPDF-Rewrite-Demo` lists, hides and
+removes the layers of a file.
+
 ## Documentation
 
 The library documentation can be accessed on [Hackage](https://hackage.haskell.org/package/HPDF)

@@ -229,6 +229,19 @@
      (`renderPdfE` gives `Left`): for example a layer that cuts a path, a
      layer of another document, or a panel that viewers do not show as
      it is written.
+   * The layers of a file that is read, `Graphics.PDF.File`: `readLayers`
+     lists them (names, states, usage, panel, radio groups,
+     configurations), and `writeLayers` changes them and writes only the
+     objects that change, so that an incremental update keeps the
+     signatures. `addLayer` adds a layer, `putPageInLayer` and
+     `putAnnotationsInLayer` put a page in a layer, and `removeLayer`
+     removes a layer and the content that is visible only with it: the
+     marked content of its sequences in the pages, the forms, the
+     patterns, the Type 3 glyphs and the appearances, the XObjects and
+     the annotations in it. The removal keeps the graphics state that the
+     hidden content sets, as a viewer does.
+   * `decodeStream` decodes ASCIIHexDecode and ASCII85Decode, and lists of
+     filters with their `/DecodeParms`.
 
 ## 1.8
 

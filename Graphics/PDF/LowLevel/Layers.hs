@@ -16,7 +16,7 @@ module Graphics.PDF.LowLevel.Layers
 import qualified Data.IntMap as IM
 import qualified Data.IntSet as IS
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Graphics.PDF.LowLevel.Types
 import Graphics.PDF.LowLevel.OptionalContent
@@ -101,26 +101,19 @@ optionalContentEntries pdfa oc
     ++ (if configUsage c then non_empty "AS" automatic_states else [])
 
   -- See Note [Layers set by usage] in Graphics.PDF.OptionalContent
-  automatic_states = concat
-    [ event "View" [("Zoom", with (isJust . layerZoom)), ("Language", with (isJust . layerLanguage))]
-    , event "Print" [("Print", with (isJust . layerPrint))]
-    , event "Export" [("Export", with (isJust . layerExport))]
-    ]
-  event name categories
-    | null used = []
-    | otherwise =
-        [ dictFromList
-            [ entry "Event" (PDFName name)
-            , entry "Category" [ PDFName c | (c, _) <- used ]
-            , entry "OCGs" [ ref n | n <- numbers, IS.member n in_event ] ] ]
-    where
-      used = [ c | c@(_, ls) <- categories, not (null ls) ]
-      in_event = IS.fromList (concatMap snd used)
+  automatic_states =
+    [ dictFromList
+        [ entry "Event" (PDFName event)
+        , entry "Category" (map PDFName categories)
+        , entry "OCGs" (map ref ocgs) ]
+    | (event, categories, ocgs) <- usageApplications [ (n, o) | (n, _, o) <- layers ] ]
 
   order = concatMap item
   item (LayerEntry n []) = [AnyPdfObject (ref n)]
   item (LayerEntry n kids) = [AnyPdfObject (ref n), AnyPdfObject (order kids)]
-  item (LayerLabel t kids) = [AnyPdfObject (pdfTextString t : order kids)]
+  item (LayerLabel t kids)
+    | T.null t = [AnyPdfObject (order kids)]
+    | otherwise = [AnyPdfObject (pdfTextString t : order kids)]
 
   non_empty :: PdfObject a => String -> [a] -> [(PDFName, AnyPdfObject)]
   non_empty k xs = [ entry k xs | not (null xs) ]
@@ -156,23 +149,7 @@ optionalContentEntries pdfa oc
           | c <- configs, Just p <- [configPanel c], missing p ]
         ]
     ]
-  panel_problems what p =
-       [ what ++ " has the layer " ++ layer_name n ++ " more than one time" | n <- duplicates (panel_layers p) ]
-    ++ label_problems what p
-  -- See Note [Labels of the layer panel] in Graphics.PDF.OptionalContent
-  label_problems what items = concat
-    [ [ what ++ " has the label " ++ show t ++ " immediately after the layer " ++ layer_name n
-        ++ ", which has no children: a viewer shows the group of the label as the children of the layer"
-      | (LayerEntry n [], LayerLabel t _) <- zip items (drop 1 items) ]
-    , [ what ++ " has the label " ++ show t ++ " as the first child of the layer " ++ layer_name n
-        ++ ": poppler does not show the group of the label"
-      | LayerEntry n (LayerLabel t _ : _) <- items ]
-    , [ what ++ " has the label " ++ show t ++ " as the first item of the group " ++ show l
-        ++ ": poppler does not show the group " ++ show l
-      | LayerLabel l (LayerLabel t _ : _) <- items ]
-    , concat [ label_problems what kids | LayerEntry _ kids <- items ]
-    , concat [ label_problems what kids | LayerLabel _ kids <- items ]
-    ]
+  panel_problems = panelProblems layer_name
   missing p = let present = IS.fromList (panel_layers p) in any (not . (`IS.member` present)) numbers
 
   duplicates :: Ord a => [a] -> [a]

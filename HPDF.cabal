@@ -74,6 +74,7 @@ Test-Suite HPDF-Tests
                      Tests.Repair
                      Tests.ObjectStreams
                      Tests.OptionalContent
+                     Tests.FileLayers
                      Tests.Signature
                      Tests.TrueType
                      Tests.Typesetting
@@ -121,7 +122,8 @@ Executable HPDF-Rewrite-Demo
   hs-source-dirs:    Test
   Build-depends:     base >= 4,
                      HPDF,
-                     containers
+                     containers,
+                     text >= 1.2.0
   Default-language:  Haskell2010
 
 Executable HPDF-Sign-Demo
@@ -215,6 +217,10 @@ library
      Graphics.PDF.File.Crypt
      Graphics.PDF.File.Encrypt
      Graphics.PDF.File.Update
+     Graphics.PDF.File.Text
+     Graphics.PDF.File.Content
+     Graphics.PDF.File.Layers
+     Graphics.PDF.File.LayerRemoval
      Graphics.PDF.LowLevel.PNG
      Graphics.PDF.LowLevel.Signature
      Graphics.PDF.LowLevel.CMS

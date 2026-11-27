@@ -31,6 +31,7 @@ import Data.Word (Word8)
 import Graphics.PDF.File.Cipher
 import Graphics.PDF.File.Object
 import Graphics.PDF.File.Permissions (Permissions, permissionsFromValue)
+import Graphics.PDF.File.Text (pdfDocEncoding)
 
 -- Note [Standard security handler]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -61,9 +62,10 @@ import Graphics.PDF.File.Permissions (Permissions, permissionsFromValue)
 -- A password is text, and the revision of the handler gives its bytes:
 --
 -- * /R 2 to 4: PDFDocEncoding, padded or truncated to 32 bytes
---   ('pdf_doc_encoding'). PDFDocEncoding is ISO Latin 1, except for some
---   codes: for example "’" is 0x90 and "€" is 0xA0. A character that
---   PDFDocEncoding does not have cannot be a character of such a password.
+--   ('pdfDocEncoding' in Graphics.PDF.File.Text). PDFDocEncoding is ISO
+--   Latin 1, except for some codes: for example "’" is 0x90 and "€" is
+--   0xA0. A character that PDFDocEncoding does not have cannot be a
+--   character of such a password.
 -- * /R 5 and 6: UTF-8 after SASLprep (RFC 4013), truncated to 127 bytes.
 --   The reader does not apply SASLprep: SASLprep does not change a
 --   password in ASCII.
@@ -222,23 +224,6 @@ password_padding = S.pack
 pad_password :: S.ByteString -> S.ByteString
 pad_password pw = S.take 32 (pw <> password_padding)
 
--- | The bytes of a text in PDFDocEncoding (PDF 32000-1, Annex D), or
--- Nothing for a character that PDFDocEncoding does not have.
--- See Note [Passwords of an encrypted file]
-pdf_doc_encoding :: T.Text -> Maybe S.ByteString
-pdf_doc_encoding = fmap S.pack . traverse code . T.unpack
-  where
-    code c
-      | Just w <- lookup c special = Just w
-      | c < '\x18' || (c >= ' ' && c <= '~') || (c >= '\xA1' && c <= '\xFF' && c /= '\xAD') = Just (fromIntegral (fromEnum c))
-      | otherwise = Nothing
-    -- the codes that are not the ones of ISO Latin 1
-    special = zip "\x02D8\x02C7\x02C6\x02D9\x02DD\x02DB\x02DA\x02DC" [0x18 .. 0x1F]
-           ++ zip ("\x2022\x2020\x2021\x2026\x2014\x2013\x0192\x2044\x2039\x203A\x2212\x2030\x201E\x201C\x201D\x2018"
-                   ++ "\x2019\x201A\x2122\xFB01\xFB02\x0141\x0152\x0160\x0178\x017D\x0131\x0142\x0153\x0161\x017E")
-                  [0x80 .. 0x9E]
-           ++ [('\x20AC', 0xA0)]
-
 -- | The key of the file for /R 2 to 4, from the owner password or the
 -- user password (PDF 32000-1, 7.6.3.3 and 7.6.3.4, algorithms 2, 6 and 7),
 -- and True for the owner password
@@ -249,7 +234,7 @@ md5_key h file_id password = do
   unless (S.length (h_owner h) >= 32 && S.length (h_user h) >= 32 && h_bits h <= 128) $
     Left "the /O or the /U of the encryption is not correct"
   -- See Note [Passwords of an encrypted file]
-  bytes <- maybe (Left wrong_password) Right (pdf_doc_encoding password)
+  bytes <- maybe (Left wrong_password) Right (pdfDocEncoding password)
   let n = if r == 2 then 5 else fromInteger (h_bits h) `div` 8
       file_key pw =
         let first = md5 (S.concat [ pad_password pw, o, int32LE (h_permissions h), file_id

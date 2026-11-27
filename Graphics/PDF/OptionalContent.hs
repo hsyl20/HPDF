@@ -244,7 +244,7 @@ instance OptionalContent LayerCondition where
 -- the viewer.
 createLayer :: Monad m => T.Text -> LayerOptions -> PDFT m Layer
 createLayer name options = do
-  mapM_ add_problem (zoom_problems name options)
+  mapM_ add_problem (zoomProblem name options)
   PDFReference n <- addObject (layer_dictionary name options)
   modify_oc $ \oc -> oc {ocLayers = (n, name, options) : ocLayers oc, ocKnown = IS.insert n (ocKnown oc)}
   return (Layer n)
@@ -266,17 +266,6 @@ layer_dictionary name o = dictFromList $
       | Just l <- [layerLanguage o] ]
     ]
   state b = PDFName (if b then "ON" else "OFF")
-
-zoom_problems :: T.Text -> LayerOptions -> [String]
-zoom_problems name o = case layerZoom o of
-  Just (lo, hi)
-    | not (finite lo) || lo < 0 || maybe False (\h -> not (finite h) || h <= lo) hi ->
-        [ "the layer " ++ show name ++ " has a zoom from " ++ show lo ++ " to "
-          ++ maybe "no maximum" show hi
-          ++ "; the minimum must be 0 or more, and the maximum must be above the minimum" ]
-  _ -> []
- where
-  finite x = not (isNaN x || isInfinite x)
 
 -- | Create a condition on layers. Content in the condition ('inLayer') is
 -- visible when the condition is true. See Note [Conditions on layers]
@@ -308,20 +297,10 @@ createLayerCondition expr = do
 -- | The /P policy or the /VE expression of a condition.
 -- See Note [Conditions on layers]
 membership :: LayerExpr Int -> (Maybe String, Maybe AnyPdfObject)
-membership e = case e of
-  LayerOn _ -> simple "AnyOn"
-  LayerNot (LayerOn _) -> simple "AllOff"
-  LayerAnd xs | not (null xs), all is_on xs -> simple "AllOn"
-  LayerOr xs | not (null xs), all is_on xs -> simple "AnyOn"
-  LayerOr xs | not (null xs), all is_off xs -> simple "AnyOff"
-  LayerAnd xs | not (null xs), all is_off xs -> simple "AllOff"
-  _ -> (Nothing, Just (visibility e))
+membership e = case conditionPolicy e of
+  Just p -> (Just p, Nothing)
+  Nothing -> (Nothing, Just (visibility e))
  where
-  simple p = (Just p, Nothing)
-  is_on (LayerOn _) = True
-  is_on _ = False
-  is_off (LayerNot (LayerOn _)) = True
-  is_off _ = False
   visibility x = case x of
     LayerOn n -> AnyPdfObject (ref n)
     LayerNot y -> AnyPdfObject [AnyPdfObject (PDFName "Not"), visibility y]
